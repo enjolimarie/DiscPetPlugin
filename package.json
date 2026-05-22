@@ -1,0 +1,15 @@
+{
+  "name": "disc-plugin",
+  "version": "1.0.0",
+  "description": "A Discord server pet bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "deploy": "node deploy-commands.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5"
+  }
+}
