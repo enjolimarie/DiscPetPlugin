@@ -25,6 +25,8 @@ function statBar(value) {
 }
 
 module.exports = {
+  statBar,       // exported for unit testing
+  speciesEmoji,  // exported for unit testing
   data: new SlashCommandBuilder()
     .setName('pet')
     .setDescription('Manage your server pet')
