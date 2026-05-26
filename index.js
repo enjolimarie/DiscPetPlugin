@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, MessageFlags } = require('discord.js');
 const fs   = require('fs');
 const path = require('path');
 
@@ -15,8 +15,12 @@ for (const file of fs.readdirSync(commandsPath).filter(f => f.endsWith('.js'))) 
   }
 }
 
-client.once('ready', () => {
+client.once('clientReady', () => {
   console.log(`Ready! Logged in as ${client.user.tag}`);
+});
+
+client.on('error', (err) => {
+  console.error('Client error:', err);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -29,11 +33,15 @@ client.on('interactionCreate', async interaction => {
     await command.execute(interaction);
   } catch (err) {
     console.error(err);
-    const payload = { content: 'Something went wrong while running that command.', ephemeral: true };
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp(payload);
-    } else {
-      await interaction.reply(payload);
+    const payload = { content: 'Something went wrong while running that command.', flags: MessageFlags.Ephemeral };
+    try {
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp(payload);
+      } else {
+        await interaction.reply(payload);
+      }
+    } catch (followUpErr) {
+      console.error('Could not send error response:', followUpErr.message);
     }
   }
 });

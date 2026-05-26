@@ -49,6 +49,10 @@ Stats are always clamped to `[0, 100]`. Use `clamp()` from `database/db.js` when
 2. Run `npm run deploy` to register the new command schema with Discord.
    `index.js` auto-loads all `.js` files in `commands/` — no manual registration needed there.
 
+## Resolved Issues
+
+- **Issue 001** — DM guard: bot now rejects `/pet` commands sent via DM (`guildId` null check at top of `execute()`).
+
 ## Planned Features (TODOs)
 
 The following are stubbed with `// TODO` comments and not yet implemented:

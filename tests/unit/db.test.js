@@ -2,7 +2,36 @@
 // Must be set before the module is first required.
 process.env.TEST_DB_PATH = ':memory:';
 
-const { getPet, createPet, clamp } = require('../../database/db');
+const { getPet, createPet, deletePet, clamp } = require('../../database/db');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// deletePet()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('deletePet()', () => {
+  test('removes the pet so getPet returns undefined', () => {
+    createPet('guild-del-1', 'Dusty', 'cat');
+    deletePet('guild-del-1');
+    expect(getPet('guild-del-1')).toBeUndefined();
+  });
+
+  test('does not affect other guilds', () => {
+    createPet('guild-del-2', 'Alpha', 'dog');
+    createPet('guild-del-3', 'Beta',  'cat');
+    deletePet('guild-del-2');
+    expect(getPet('guild-del-3').pet_name).toBe('Beta');
+  });
+
+  test('silently succeeds when the guild has no pet', () => {
+    expect(() => deletePet('guild-del-nonexistent')).not.toThrow();
+  });
+
+  test('allows a new pet to be adopted after removal', () => {
+    createPet('guild-del-4', 'Old', 'hamster');
+    deletePet('guild-del-4');
+    const newPet = createPet('guild-del-4', 'New', 'rabbit');
+    expect(newPet.pet_name).toBe('New');
+  });
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // clamp()

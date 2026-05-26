@@ -34,10 +34,14 @@ function createPet(guildId, name, species) {
   return getPet(guildId);
 }
 
+function deletePet(guildId) {
+  db.prepare('DELETE FROM pets WHERE guild_id = ?').run(guildId);
+}
+
 // TODO: updateStat(guildId, stat, delta) — apply a delta to one stat column, clamped to [0, 100];
 //       update last_updated; used by feed, play, clean, sleep commands.
 
 // TODO: addXP(guildId, amount) — add XP to the pet and trigger a level-up when the threshold
 //       is reached (define a level → XP threshold table here).
 
-module.exports = { getPet, createPet, clamp };
+module.exports = { getPet, createPet, deletePet, clamp };

@@ -1,11 +1,12 @@
 jest.mock('../../database/db', () => ({
   getPet:    jest.fn(),
   createPet: jest.fn(),
+  deletePet: jest.fn(),
   clamp:     jest.fn((v) => Math.max(0, Math.min(100, Math.round(v)))),
 }));
 
 const { execute } = require('../../commands/pet');
-const { getPet, createPet } = require('../../database/db');
+const { getPet, createPet, deletePet } = require('../../database/db');
 const { buildMockInteraction } = require('../helpers/mockInteraction');
 
 const HEALTHY_PET = {
@@ -57,7 +58,7 @@ describe('/pet adopt', () => {
 
     expect(createPet).not.toHaveBeenCalled();
     expect(ix.reply).toHaveBeenCalledWith(
-      expect.objectContaining({ ephemeral: true, content: expect.stringContaining('OldPet') }),
+      expect.objectContaining({ flags: 64, content: expect.stringContaining('OldPet') }),
     );
   });
 
@@ -68,7 +69,7 @@ describe('/pet adopt', () => {
     await execute(ix);
 
     expect(createPet).not.toHaveBeenCalled();
-    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ ephemeral: true }));
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
   });
 
   test('replies ephemerally when custom_species is whitespace only', async () => {
@@ -78,7 +79,7 @@ describe('/pet adopt', () => {
     await execute(ix);
 
     expect(createPet).not.toHaveBeenCalled();
-    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ ephemeral: true }));
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
   });
 
   test('uses the custom_species value as the final species', async () => {
@@ -101,16 +102,59 @@ describe('/pet adopt', () => {
     expect(createPet).toHaveBeenCalledWith('guild-123', 'Axo', 'axolotl');
   });
 
-  // ── Regression: Issue 001 ─────────────────────────────────────────────────
-  // No DM guard exists; guildId is null in DMs and an orphan row can be inserted.
-  test.failing('refuses with ephemeral error when invoked in a DM (Issue 001)', async () => {
+  test('refuses with ephemeral error when invoked in a DM (Issue 001)', async () => {
     getPet.mockReturnValue(undefined);
 
     const ix = buildMockInteraction({ guildId: null, options: { name: 'Ghost', species: 'cat' } });
     await execute(ix);
 
     expect(createPet).not.toHaveBeenCalled();
-    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ ephemeral: true }));
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /pet remove
+// ─────────────────────────────────────────────────────────────────────────────
+describe('/pet remove', () => {
+  test('replies ephemerally when the server has no pet', async () => {
+    getPet.mockReturnValue(undefined);
+
+    const ix = buildMockInteraction({ subcommand: 'remove', options: { confirm: 'Buddy' } });
+    await execute(ix);
+
+    expect(deletePet).not.toHaveBeenCalled();
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
+  });
+
+  test('replies ephemerally when the confirmation name does not match', async () => {
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand: 'remove', options: { confirm: 'WrongName' } });
+    await execute(ix);
+
+    expect(deletePet).not.toHaveBeenCalled();
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
+  });
+
+  test('deletes the pet and replies when the name matches exactly', async () => {
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand: 'remove', options: { confirm: 'Buddy' } });
+    await execute(ix);
+
+    expect(deletePet).toHaveBeenCalledWith('guild-123');
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Buddy') }));
+  });
+
+  test('confirmation is case-sensitive', async () => {
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand: 'remove', options: { confirm: 'buddy' } });
+    await execute(ix);
+
+    expect(deletePet).not.toHaveBeenCalled();
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
   });
 });
 
@@ -124,7 +168,7 @@ describe('/pet status', () => {
     const ix = buildMockInteraction({ subcommand: 'status' });
     await execute(ix);
 
-    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ ephemeral: true }));
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
   });
 
   test('replies with an embed when a pet exists', async () => {

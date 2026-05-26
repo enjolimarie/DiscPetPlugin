@@ -1,5 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getPet, createPet } = require('../database/db');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const { getPet, createPet, deletePet } = require('../database/db');
 
 const SPECIES_EMOJI = {
   cat:          '🐱',
@@ -70,11 +70,30 @@ module.exports = {
       sub
         .setName('status')
         .setDescription("View your server pet's current status"),
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('remove')
+        .setDescription('Permanently remove this server\'s pet')
+        .addStringOption(opt =>
+          opt
+            .setName('confirm')
+            .setDescription('Type the pet\'s name to confirm removal')
+            .setRequired(true),
+        ),
     ),
 
   async execute(interaction) {
-    const sub     = interaction.options.getSubcommand();
     const guildId = interaction.guildId;
+
+    if (!guildId) {
+      return interaction.reply({
+        content: 'Pet commands can only be used inside a server, not in DMs.',
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    const sub = interaction.options.getSubcommand();
 
     // ── /pet adopt ────────────────────────────────────────────────────────────
     if (sub === 'adopt') {
@@ -82,7 +101,7 @@ module.exports = {
       if (existing) {
         return interaction.reply({
           content: `This server already has a pet named **${existing.pet_name}**! Each server can only have one pet.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -94,7 +113,7 @@ module.exports = {
         if (!custom?.trim()) {
           return interaction.reply({
             content: 'You selected **Custom** species but did not provide a `custom_species` value. Please re-run the command and fill in that field.',
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
         }
       }
@@ -115,13 +134,37 @@ module.exports = {
       return interaction.reply({ embeds: [embed] });
     }
 
+    // ── /pet remove ───────────────────────────────────────────────────────────
+    if (sub === 'remove') {
+      const pet = getPet(guildId);
+      if (!pet) {
+        return interaction.reply({
+          content: "This server doesn't have a pet to remove.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      const confirmation = interaction.options.getString('confirm');
+      if (confirmation !== pet.pet_name) {
+        return interaction.reply({
+          content: `That name doesn't match. To confirm, type the pet's name exactly: **${pet.pet_name}**`,
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      deletePet(guildId);
+      return interaction.reply({
+        content: `**${pet.pet_name}** has been removed. You can adopt a new pet with \`/pet adopt\`.`,
+      });
+    }
+
     // ── /pet status ───────────────────────────────────────────────────────────
     if (sub === 'status') {
       const pet = getPet(guildId);
       if (!pet) {
         return interaction.reply({
           content: "This server doesn't have a pet yet! Use `/pet adopt` to get one.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
