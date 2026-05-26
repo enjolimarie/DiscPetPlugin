@@ -45,16 +45,24 @@ function xpBar(xp, level) {
   return '█'.repeat(Math.max(0, filled)) + '░'.repeat(Math.max(0, 10 - filled)) + ` ${xp}/${needed}`;
 }
 
+function getLifeStage(level) {
+  if (level <= 5)  return { label: 'Baby',  emoji: '🍼' };
+  if (level <= 15) return { label: 'Child', emoji: '🌱' };
+  if (level <= 30) return { label: 'Teen',  emoji: '⚡' };
+  return                  { label: 'Adult', emoji: '👑' };
+}
+
 function buildStatusEmbed(pet) {
   const emoji     = speciesEmoji(pet.species);
   const avg       = Math.round((pet.hunger + pet.mood + pet.energy + pet.cleanliness) / 4);
   const color     = avg >= 70 ? 0x57f287 : avg >= 40 ? 0xfee75c : 0xed4245;
   const moodState = getMoodState(pet);
+  const stage     = getLifeStage(pet.level);
 
   return new EmbedBuilder()
     .setColor(color)
     .setTitle(`${emoji} ${pet.pet_name}`)
-    .setDescription(`*A level ${pet.level} ${pet.species}* • ${moodState.emoji} ${moodState.label}`)
+    .setDescription(`*A level ${pet.level} ${pet.species}* • ${stage.emoji} ${stage.label} • ${moodState.emoji} ${moodState.label}`)
     .addFields(
       { name: '🍖 Hunger',      value: statBar(pet.hunger),          inline: false },
       { name: '😊 Mood',        value: statBar(pet.mood),            inline: false },
@@ -115,6 +123,7 @@ module.exports = {
   speciesEmoji,
   xpBar,
   getMoodState,
+  getLifeStage,
   buildStatusEmbed,
   SHOP_ITEMS,
   data: new SlashCommandBuilder()

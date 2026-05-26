@@ -53,8 +53,12 @@ function renamePet(guildId, newName) {
 }
 
 // XP required to advance from `level` to `level + 1`
+// Baby 1-5: 100 XP/level, Child 6-15: 250, Teen 16-30: 500, Adult 31+: 1000
 function xpToNextLevel(level) {
-  return level * 100;
+  if (level <= 5)  return 100;
+  if (level <= 15) return 250;
+  if (level <= 30) return 500;
+  return 1000;
 }
 
 // Stat points lost per hour of inactivity

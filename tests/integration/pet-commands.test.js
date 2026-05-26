@@ -8,7 +8,12 @@ jest.mock('../../database/db', () => ({
   applyDecay:     jest.fn(),
   claimDaily:     jest.fn(),
   spendTreats:    jest.fn(),
-  xpToNextLevel:  jest.fn((level) => level * 100),
+  xpToNextLevel:  jest.fn((level) => {
+    if (level <= 5)  return 100;
+    if (level <= 15) return 250;
+    if (level <= 30) return 500;
+    return 1000;
+  }),
   clamp:          jest.fn((v) => Math.max(0, Math.min(100, Math.round(v)))),
 }));
 

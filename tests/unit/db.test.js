@@ -190,9 +190,18 @@ describe('renamePet()', () => {
 // xpToNextLevel()
 // ─────────────────────────────────────────────────────────────────────────────
 describe('xpToNextLevel()', () => {
+  // Baby stage (levels 1–5): 100 XP each
   test('level 1 requires 100 XP', () => expect(xpToNextLevel(1)).toBe(100));
-  test('level 2 requires 200 XP', () => expect(xpToNextLevel(2)).toBe(200));
-  test('level 5 requires 500 XP', () => expect(xpToNextLevel(5)).toBe(500));
+  test('level 2 requires 100 XP', () => expect(xpToNextLevel(2)).toBe(100));
+  test('level 5 requires 100 XP', () => expect(xpToNextLevel(5)).toBe(100));
+  // Child stage (levels 6–15): 250 XP each
+  test('level 6 requires 250 XP',  () => expect(xpToNextLevel(6)).toBe(250));
+  test('level 15 requires 250 XP', () => expect(xpToNextLevel(15)).toBe(250));
+  // Teen stage (levels 16–30): 500 XP each
+  test('level 16 requires 500 XP', () => expect(xpToNextLevel(16)).toBe(500));
+  test('level 30 requires 500 XP', () => expect(xpToNextLevel(30)).toBe(500));
+  // Adult stage (levels 31+): 1000 XP each
+  test('level 31 requires 1000 XP', () => expect(xpToNextLevel(31)).toBe(1000));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -271,7 +280,8 @@ describe('addXP()', () => {
 
   test('can level up multiple times in one call', () => {
     createPet('guild-xp-4', 'Buddy', 'dog');
-    addXP('guild-xp-4', 300);
+    // 200 XP: level 1→2 costs 100, level 2→3 costs 100, total 200 → level 3, 0 XP remaining
+    addXP('guild-xp-4', 200);
     const pet = getPet('guild-xp-4');
     expect(pet.level).toBe(3);
     expect(pet.xp).toBe(0);
