@@ -2,7 +2,7 @@
 // Must be set before the module is first required.
 process.env.TEST_DB_PATH = ':memory:';
 
-const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, claimDaily, DAILY_XP, DAILY_TREATS, clamp } = require('../../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, claimDaily, DAILY_XP, DAILY_TREATS, spendTreats, clamp } = require('../../database/db');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // deletePet()
@@ -395,5 +395,40 @@ describe('claimDaily()', () => {
     claimDaily('guild-daily-7');
     jest.useRealTimers();
     expect(getPet('guild-daily-7').treats).toBe(DAILY_TREATS * 2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// spendTreats()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('spendTreats()', () => {
+  test('returns false when the guild has no pet', () => {
+    expect(spendTreats('guild-st-none', 5)).toBe(false);
+  });
+
+  test('returns false when treats balance is insufficient', () => {
+    createPet('guild-st-1', 'Buddy', 'dog');
+    expect(spendTreats('guild-st-1', 10)).toBe(false);
+  });
+
+  test('deducts treats and returns true when balance is sufficient', () => {
+    createPet('guild-st-2', 'Buddy', 'dog');
+    claimDaily('guild-st-2');
+    const result = spendTreats('guild-st-2', DAILY_TREATS);
+    expect(result).toBe(true);
+    expect(getPet('guild-st-2').treats).toBe(0);
+  });
+
+  test('allows partial spend — deducts only the requested amount', () => {
+    createPet('guild-st-3', 'Buddy', 'dog');
+    claimDaily('guild-st-3');
+    spendTreats('guild-st-3', 2);
+    expect(getPet('guild-st-3').treats).toBe(DAILY_TREATS - 2);
+  });
+
+  test('treats never go below zero', () => {
+    createPet('guild-st-4', 'Buddy', 'dog');
+    spendTreats('guild-st-4', 0);
+    expect(getPet('guild-st-4').treats).toBe(0);
   });
 });

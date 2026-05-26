@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, claimDaily } = require('../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, claimDaily, spendTreats } = require('../database/db');
 
 const SPECIES_EMOJI = {
   cat:          '🐱',
@@ -67,6 +67,41 @@ function buildStatusEmbed(pet) {
     .setFooter({ text: `Last updated • ${new Date(pet.last_updated).toLocaleString()}` });
 }
 
+const SHOP_ITEMS = {
+  premium_food: {
+    name:        'Premium Food',
+    emoji:       '🥩',
+    cost:        10,
+    description: 'A gourmet meal that satisfies more than regular food.',
+    changes:     [['hunger', +40]],
+    xp:          25,
+  },
+  premium_toy: {
+    name:        'Premium Toy',
+    emoji:       '🎪',
+    cost:        10,
+    description: 'An exciting toy that keeps your pet entertained for hours.',
+    changes:     [['mood', +30], ['energy', -5]],
+    xp:          25,
+  },
+  luxury_bath: {
+    name:        'Luxury Bath',
+    emoji:       '🛁',
+    cost:        8,
+    description: 'A spa-quality grooming session.',
+    changes:     [['cleanliness', +40]],
+    xp:          20,
+  },
+  energy_drink: {
+    name:        'Energy Drink',
+    emoji:       '⚡',
+    cost:        8,
+    description: 'A special supplement that restores energy quickly.',
+    changes:     [['energy', +40]],
+    xp:          20,
+  },
+};
+
 // Stat changes and XP reward for each action subcommand
 const ACTION_MAP = {
   feed:  { changes: [['hunger', +20]],                    xp: 10, verb: 'fed',          emoji: '🍖' },
@@ -81,6 +116,7 @@ module.exports = {
   xpBar,
   getMoodState,
   buildStatusEmbed,
+  SHOP_ITEMS,
   data: new SlashCommandBuilder()
     .setName('pet')
     .setDescription('Manage your server pet')
@@ -151,6 +187,26 @@ module.exports = {
       sub.setName('daily').setDescription('Claim your daily XP and treat reward'),
     )
     .addSubcommand(sub =>
+      sub.setName('shop').setDescription('Browse the treat shop'),
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('buy')
+        .setDescription('Buy an item from the shop using treats')
+        .addStringOption(opt =>
+          opt
+            .setName('item')
+            .setDescription('The item to purchase')
+            .setRequired(true)
+            .addChoices(
+              { name: 'Premium Food (10 treats)',  value: 'premium_food'  },
+              { name: 'Premium Toy (10 treats)',   value: 'premium_toy'   },
+              { name: 'Luxury Bath (8 treats)',    value: 'luxury_bath'   },
+              { name: 'Energy Drink (8 treats)',   value: 'energy_drink'  },
+            ),
+        ),
+    )
+    .addSubcommand(sub =>
       sub.setName('feed').setDescription('Feed your pet to restore hunger'),
     )
     .addSubcommand(sub =>
@@ -218,6 +274,60 @@ module.exports = {
       return interaction.reply({
         content: `🎁 Daily reward claimed! **${result.pet.pet_name}** received **+${result.xp} XP** and **+${result.treats} treats**!`,
         embeds: [buildStatusEmbed(result.pet)],
+      });
+    }
+
+    // ── /pet shop ─────────────────────────────────────────────────────────────
+    if (sub === 'shop') {
+      const pet = getPet(guildId);
+      const balance = pet ? pet.treats : 0;
+
+      const fields = Object.values(SHOP_ITEMS).map(item => ({
+        name:   `${item.emoji} ${item.name} — ${item.cost} 🍬`,
+        value:  item.description,
+        inline: false,
+      }));
+
+      const embed = new EmbedBuilder()
+        .setColor(0xf9a825)
+        .setTitle('🛒 Pet Shop')
+        .setDescription(`Your balance: **${balance} 🍬 treats**\nUse \`/pet buy\` to purchase an item.`)
+        .addFields(fields)
+        .setFooter({ text: 'Earn treats with /pet daily' });
+
+      return interaction.reply({ embeds: [embed] });
+    }
+
+    // ── /pet buy ──────────────────────────────────────────────────────────────
+    if (sub === 'buy') {
+      const pet = applyDecay(guildId);
+      if (!pet) {
+        return interaction.reply({
+          content: "This server doesn't have a pet yet! Use `/pet adopt` to get one.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      const itemKey = interaction.options.getString('item');
+      const item    = SHOP_ITEMS[itemKey];
+
+      const spent = spendTreats(guildId, item.cost);
+      if (!spent) {
+        return interaction.reply({
+          content: `Not enough treats! **${item.name}** costs **${item.cost} 🍬** but **${pet.pet_name}** only has **${pet.treats} 🍬**.`,
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      for (const [stat, delta] of item.changes) {
+        updateStat(guildId, stat, delta);
+      }
+      addXP(guildId, item.xp);
+
+      const updated = getPet(guildId);
+      return interaction.reply({
+        content: `${item.emoji} You used **${item.name}** on **${pet.pet_name}**! (-${item.cost} 🍬, +${item.xp} XP)`,
+        embeds: [buildStatusEmbed(updated)],
       });
     }
 

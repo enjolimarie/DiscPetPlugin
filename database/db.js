@@ -109,6 +109,14 @@ function addXP(guildId, amount) {
     .run(xp, level, Date.now(), guildId);
 }
 
+function spendTreats(guildId, amount) {
+  const pet = getPet(guildId);
+  if (!pet || pet.treats < amount) return false;
+  db.prepare('UPDATE pets SET treats = treats - ?, last_updated = ? WHERE guild_id = ?')
+    .run(amount, Date.now(), guildId);
+  return true;
+}
+
 const DAILY_XP     = 50;
 const DAILY_TREATS = 5;
 
@@ -138,4 +146,4 @@ function claimDaily(guildId) {
   return { claimed: true, xp: DAILY_XP, treats: DAILY_TREATS, pet: getPet(guildId) };
 }
 
-module.exports = { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, claimDaily, DAILY_XP, DAILY_TREATS, clamp };
+module.exports = { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, claimDaily, DAILY_XP, DAILY_TREATS, spendTreats, clamp };

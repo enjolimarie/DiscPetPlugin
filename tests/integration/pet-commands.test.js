@@ -7,12 +7,13 @@ jest.mock('../../database/db', () => ({
   addXP:          jest.fn(),
   applyDecay:     jest.fn(),
   claimDaily:     jest.fn(),
+  spendTreats:    jest.fn(),
   xpToNextLevel:  jest.fn((level) => level * 100),
   clamp:          jest.fn((v) => Math.max(0, Math.min(100, Math.round(v)))),
 }));
 
 const { execute } = require('../../commands/pet');
-const { getPet, createPet, deletePet, renamePet, updateStat, addXP, applyDecay, claimDaily } = require('../../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, applyDecay, claimDaily, spendTreats } = require('../../database/db');
 const { buildMockInteraction } = require('../helpers/mockInteraction');
 
 const HEALTHY_PET = {
@@ -269,6 +270,119 @@ describe('/pet rename', () => {
 
     expect(renamePet).not.toHaveBeenCalled();
     expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /pet shop
+// ─────────────────────────────────────────────────────────────────────────────
+describe('/pet shop', () => {
+  test('replies with a shop embed', async () => {
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand: 'shop' });
+    await execute(ix);
+
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ embeds: expect.any(Array) }));
+  });
+
+  test('embed title contains "Shop"', async () => {
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand: 'shop' });
+    await execute(ix);
+
+    expect(ix.reply.mock.calls[0][0].embeds[0].data.title).toContain('Shop');
+  });
+
+  test('embed description shows treat balance', async () => {
+    getPet.mockReturnValue({ ...HEALTHY_PET, treats: 15 });
+
+    const ix = buildMockInteraction({ subcommand: 'shop' });
+    await execute(ix);
+
+    expect(ix.reply.mock.calls[0][0].embeds[0].data.description).toContain('15');
+  });
+
+  test('shows balance of 0 when there is no pet', async () => {
+    getPet.mockReturnValue(undefined);
+
+    const ix = buildMockInteraction({ subcommand: 'shop' });
+    await execute(ix);
+
+    expect(ix.reply.mock.calls[0][0].embeds[0].data.description).toContain('0');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /pet buy
+// ─────────────────────────────────────────────────────────────────────────────
+describe('/pet buy', () => {
+  test('replies ephemerally when the server has no pet', async () => {
+    applyDecay.mockReturnValue(null);
+
+    const ix = buildMockInteraction({ subcommand: 'buy', options: { item: 'premium_food' } });
+    await execute(ix);
+
+    expect(spendTreats).not.toHaveBeenCalled();
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
+  });
+
+  test('replies ephemerally when treats are insufficient', async () => {
+    applyDecay.mockReturnValue({ ...HEALTHY_PET, treats: 5 });
+    spendTreats.mockReturnValue(false);
+
+    const ix = buildMockInteraction({ subcommand: 'buy', options: { item: 'premium_food' } });
+    await execute(ix);
+
+    expect(updateStat).not.toHaveBeenCalled();
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
+  });
+
+  test('applies stat changes and awards XP on successful purchase', async () => {
+    applyDecay.mockReturnValue(HEALTHY_PET);
+    spendTreats.mockReturnValue(true);
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand: 'buy', options: { item: 'premium_food' } });
+    await execute(ix);
+
+    expect(updateStat).toHaveBeenCalledWith('guild-123', 'hunger', 40);
+    expect(addXP).toHaveBeenCalledWith('guild-123', 25);
+  });
+
+  test('replies with item name and updated status embed on success', async () => {
+    applyDecay.mockReturnValue(HEALTHY_PET);
+    spendTreats.mockReturnValue(true);
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand: 'buy', options: { item: 'premium_toy' } });
+    await execute(ix);
+
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('Premium Toy'),
+      embeds:  expect.any(Array),
+    }));
+  });
+
+  test('each shop item applies the correct stat changes', async () => {
+    const cases = [
+      { item: 'premium_food',  stat: 'hunger',      delta: 40, xp: 25 },
+      { item: 'luxury_bath',   stat: 'cleanliness',  delta: 40, xp: 20 },
+      { item: 'energy_drink',  stat: 'energy',       delta: 40, xp: 20 },
+    ];
+    for (const { item, stat, delta, xp } of cases) {
+      jest.clearAllMocks();
+      applyDecay.mockReturnValue(HEALTHY_PET);
+      spendTreats.mockReturnValue(true);
+      getPet.mockReturnValue(HEALTHY_PET);
+
+      const ix = buildMockInteraction({ subcommand: 'buy', options: { item } });
+      await execute(ix);
+
+      expect(updateStat).toHaveBeenCalledWith('guild-123', stat, delta);
+      expect(addXP).toHaveBeenCalledWith('guild-123', xp);
+    }
   });
 });
 
