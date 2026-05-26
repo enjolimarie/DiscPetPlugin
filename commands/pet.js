@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay } = require('../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, claimDaily } = require('../database/db');
 
 const SPECIES_EMOJI = {
   cat:          '🐱',
@@ -62,6 +62,7 @@ function buildStatusEmbed(pet) {
       { name: '🛁 Cleanliness', value: statBar(pet.cleanliness),     inline: false },
       { name: '⭐ Level',        value: `${pet.level}`,               inline: true  },
       { name: '✨ XP',           value: xpBar(pet.xp, pet.level),    inline: true  },
+      { name: '🍬 Treats',       value: `${pet.treats ?? 0}`,        inline: true  },
     )
     .setFooter({ text: `Last updated • ${new Date(pet.last_updated).toLocaleString()}` });
 }
@@ -147,6 +148,9 @@ module.exports = {
         ),
     )
     .addSubcommand(sub =>
+      sub.setName('daily').setDescription('Claim your daily XP and treat reward'),
+    )
+    .addSubcommand(sub =>
       sub.setName('feed').setDescription('Feed your pet to restore hunger'),
     )
     .addSubcommand(sub =>
@@ -189,6 +193,31 @@ module.exports = {
       return interaction.reply({
         content: `You ${action.verb} **${pet.pet_name}**! ${action.emoji}`,
         embeds: [buildStatusEmbed(updated)],
+      });
+    }
+
+    // ── /pet daily ────────────────────────────────────────────────────────────
+    if (sub === 'daily') {
+      const result = claimDaily(guildId);
+      if (!result) {
+        return interaction.reply({
+          content: "This server doesn't have a pet yet! Use `/pet adopt` to get one.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      if (!result.claimed) {
+        const hours   = Math.floor(result.msUntilReset / (1000 * 60 * 60));
+        const minutes = Math.floor((result.msUntilReset % (1000 * 60 * 60)) / (1000 * 60));
+        return interaction.reply({
+          content: `You've already claimed today's reward! Come back in **${hours}h ${minutes}m**.`,
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      return interaction.reply({
+        content: `🎁 Daily reward claimed! **${result.pet.pet_name}** received **+${result.xp} XP** and **+${result.treats} treats**!`,
+        embeds: [buildStatusEmbed(result.pet)],
       });
     }
 

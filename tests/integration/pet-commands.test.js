@@ -6,12 +6,13 @@ jest.mock('../../database/db', () => ({
   updateStat:     jest.fn(),
   addXP:          jest.fn(),
   applyDecay:     jest.fn(),
+  claimDaily:     jest.fn(),
   xpToNextLevel:  jest.fn((level) => level * 100),
   clamp:          jest.fn((v) => Math.max(0, Math.min(100, Math.round(v)))),
 }));
 
 const { execute } = require('../../commands/pet');
-const { getPet, createPet, deletePet, renamePet, updateStat, addXP, applyDecay } = require('../../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, applyDecay, claimDaily } = require('../../database/db');
 const { buildMockInteraction } = require('../helpers/mockInteraction');
 
 const HEALTHY_PET = {
@@ -24,6 +25,8 @@ const HEALTHY_PET = {
   cleanliness:  80,
   level:        1,
   xp:           0,
+  treats:       0,
+  last_daily:   0,
   last_updated: Date.now(),
 };
 
@@ -160,6 +163,66 @@ describe('/pet remove', () => {
 
     expect(deletePet).not.toHaveBeenCalled();
     expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /pet daily
+// ─────────────────────────────────────────────────────────────────────────────
+describe('/pet daily', () => {
+  test('replies ephemerally when the server has no pet', async () => {
+    claimDaily.mockReturnValue(null);
+
+    const ix = buildMockInteraction({ subcommand: 'daily' });
+    await execute(ix);
+
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
+  });
+
+  test('replies with reward content and embed on successful claim', async () => {
+    claimDaily.mockReturnValue({ claimed: true, xp: 50, treats: 5, pet: HEALTHY_PET });
+
+    const ix = buildMockInteraction({ subcommand: 'daily' });
+    await execute(ix);
+
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('Daily reward claimed'),
+      embeds:  expect.any(Array),
+    }));
+  });
+
+  test('reward message includes XP and treat amounts', async () => {
+    claimDaily.mockReturnValue({ claimed: true, xp: 50, treats: 5, pet: HEALTHY_PET });
+
+    const ix = buildMockInteraction({ subcommand: 'daily' });
+    await execute(ix);
+
+    const content = ix.reply.mock.calls[0][0].content;
+    expect(content).toContain('50');
+    expect(content).toContain('5');
+  });
+
+  test('replies ephemerally with cooldown message when already claimed', async () => {
+    claimDaily.mockReturnValue({ claimed: false, msUntilReset: 3 * 60 * 60 * 1000 });
+
+    const ix = buildMockInteraction({ subcommand: 'daily' });
+    await execute(ix);
+
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({
+      flags:   64,
+      content: expect.stringContaining('already claimed'),
+    }));
+  });
+
+  test('cooldown message shows hours and minutes', async () => {
+    claimDaily.mockReturnValue({ claimed: false, msUntilReset: 3 * 60 * 60 * 1000 + 30 * 60 * 1000 });
+
+    const ix = buildMockInteraction({ subcommand: 'daily' });
+    await execute(ix);
+
+    const content = ix.reply.mock.calls[0][0].content;
+    expect(content).toContain('3h');
+    expect(content).toContain('30m');
   });
 });
 

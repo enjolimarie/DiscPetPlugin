@@ -2,7 +2,7 @@
 // Must be set before the module is first required.
 process.env.TEST_DB_PATH = ':memory:';
 
-const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, clamp } = require('../../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, claimDaily, DAILY_XP, DAILY_TREATS, clamp } = require('../../database/db');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // deletePet()
@@ -335,5 +335,65 @@ describe('applyDecay()', () => {
     jest.advanceTimersByTime(60 * 60 * 1000);
     const pet = applyDecay('guild-decay-5');
     expect(pet.last_updated).toBeGreaterThan(before);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// claimDaily()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('claimDaily()', () => {
+  test('returns null when the guild has no pet', () => {
+    expect(claimDaily('guild-daily-none')).toBeNull();
+  });
+
+  test('awards XP and treats on first claim', () => {
+    createPet('guild-daily-1', 'Buddy', 'dog');
+    const result = claimDaily('guild-daily-1');
+    expect(result.claimed).toBe(true);
+    expect(result.xp).toBe(DAILY_XP);
+    expect(result.treats).toBe(DAILY_TREATS);
+  });
+
+  test('pet has increased treats after claiming', () => {
+    createPet('guild-daily-2', 'Buddy', 'dog');
+    claimDaily('guild-daily-2');
+    expect(getPet('guild-daily-2').treats).toBe(DAILY_TREATS);
+  });
+
+  test('pet has increased XP after claiming', () => {
+    createPet('guild-daily-3', 'Buddy', 'dog');
+    claimDaily('guild-daily-3');
+    expect(getPet('guild-daily-3').xp).toBe(DAILY_XP);
+  });
+
+  test('returns claimed: false when called twice on the same UTC day', () => {
+    createPet('guild-daily-4', 'Buddy', 'dog');
+    claimDaily('guild-daily-4');
+    const second = claimDaily('guild-daily-4');
+    expect(second.claimed).toBe(false);
+  });
+
+  test('returns msUntilReset when on cooldown', () => {
+    createPet('guild-daily-5', 'Buddy', 'dog');
+    claimDaily('guild-daily-5');
+    const result = claimDaily('guild-daily-5');
+    expect(result.msUntilReset).toBeGreaterThan(0);
+  });
+
+  test('does not award treats a second time on the same day', () => {
+    createPet('guild-daily-6', 'Buddy', 'dog');
+    claimDaily('guild-daily-6');
+    claimDaily('guild-daily-6');
+    expect(getPet('guild-daily-6').treats).toBe(DAILY_TREATS);
+  });
+
+  test('treats accumulate across separate days', () => {
+    jest.useFakeTimers();
+    createPet('guild-daily-7', 'Buddy', 'dog');
+    claimDaily('guild-daily-7');
+    jest.advanceTimersByTime(25 * 60 * 60 * 1000); // skip to next day
+    claimDaily('guild-daily-7');
+    jest.useRealTimers();
+    expect(getPet('guild-daily-7').treats).toBe(DAILY_TREATS * 2);
   });
 });

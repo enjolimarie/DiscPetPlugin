@@ -19,6 +19,14 @@ db.exec(`
   )
 `);
 
+// Add new columns to existing databases that were created before these were added
+for (const sql of [
+  'ALTER TABLE pets ADD COLUMN treats    INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE pets ADD COLUMN last_daily INTEGER NOT NULL DEFAULT 0',
+]) {
+  try { db.exec(sql); } catch { /* column already exists */ }
+}
+
 // Ensures no stat ever escapes [0, 100]
 const clamp = (val) => Math.max(0, Math.min(100, Math.round(val)));
 
@@ -28,8 +36,8 @@ function getPet(guildId) {
 
 function createPet(guildId, name, species) {
   db.prepare(`
-    INSERT INTO pets (guild_id, pet_name, species, hunger, mood, energy, cleanliness, level, xp, last_updated)
-    VALUES (?, ?, ?, 80, 80, 80, 80, 1, 0, ?)
+    INSERT INTO pets (guild_id, pet_name, species, hunger, mood, energy, cleanliness, level, xp, last_updated, treats, last_daily)
+    VALUES (?, ?, ?, 80, 80, 80, 80, 1, 0, ?, 0, 0)
   `).run(guildId, name, species, Date.now());
   return getPet(guildId);
 }
@@ -101,4 +109,33 @@ function addXP(guildId, amount) {
     .run(xp, level, Date.now(), guildId);
 }
 
-module.exports = { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, clamp };
+const DAILY_XP     = 50;
+const DAILY_TREATS = 5;
+
+function claimDaily(guildId) {
+  const pet = getPet(guildId);
+  if (!pet) return null;
+
+  const now  = Date.now();
+  const last = new Date(pet.last_daily);
+  const curr = new Date(now);
+  const alreadyClaimed =
+    pet.last_daily > 0 &&
+    last.getUTCFullYear() === curr.getUTCFullYear() &&
+    last.getUTCMonth()    === curr.getUTCMonth()    &&
+    last.getUTCDate()     === curr.getUTCDate();
+
+  if (alreadyClaimed) {
+    const nextMidnight = new Date();
+    nextMidnight.setUTCHours(24, 0, 0, 0);
+    return { claimed: false, msUntilReset: nextMidnight.getTime() - now };
+  }
+
+  addXP(guildId, DAILY_XP);
+  db.prepare('UPDATE pets SET treats = treats + ?, last_daily = ?, last_updated = ? WHERE guild_id = ?')
+    .run(DAILY_TREATS, now, now, guildId);
+
+  return { claimed: true, xp: DAILY_XP, treats: DAILY_TREATS, pet: getPet(guildId) };
+}
+
+module.exports = { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, claimDaily, DAILY_XP, DAILY_TREATS, clamp };

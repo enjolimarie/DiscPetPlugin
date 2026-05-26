@@ -38,6 +38,7 @@ npm start        # start the bot
 | `/pet clean` | Cleanliness +20, Mood -5, XP +10. Shows updated status embed. |
 | `/pet sleep` | Energy +30, Mood -5, XP +5. Shows updated status embed. |
 | `/pet rename` | Give the server pet a new name. |
+| `/pet daily` | Claim daily reward: +50 XP and +5 treats. Once per UTC day. Shows cooldown if already claimed. |
 
 ## Database Layer (`database/db.js`)
 
@@ -47,6 +48,7 @@ npm start        # start the bot
 | `createPet(guildId, name, species)` | Inserts a new pet with all stats at 80. |
 | `deletePet(guildId)` | Removes the pet row. |
 | `renamePet(guildId, newName)` | Updates the pet's name and returns the updated row. |
+| `claimDaily(guildId)` | Awards daily XP and treats if not yet claimed today (UTC). Returns `{ claimed, xp, treats, pet }` or `{ claimed: false, msUntilReset }`. |
 | `updateStat(guildId, stat, delta)` | Applies a delta to one stat column, clamped to [0, 100]. |
 | `addXP(guildId, amount)` | Adds XP and triggers level-ups. Excess XP carries over. |
 | `xpToNextLevel(level)` | Returns `level * 100` — XP needed to advance from `level` to `level + 1`. |
@@ -66,6 +68,8 @@ npm start        # start the bot
 | `level` | INTEGER | 1 |
 | `xp` | INTEGER | 0 |
 | `last_updated` | INTEGER | epoch ms |
+| `treats` | INTEGER | 0 |
+| `last_daily` | INTEGER | 0 (never claimed) |
 
 Stats are always clamped to `[0, 100]`. Use `clamp()` from `database/db.js` whenever writing a stat.
 
@@ -92,11 +96,13 @@ npm test
 - **Issue 005** — Stats were permanently frozen at their initial values; stat decay now reduces hunger/mood/energy/cleanliness over time.
 - **Issue 006** — No way to rename a pet after adoption; `/pet rename` now allows the server to update the pet's name at any time.
 - **Issue 007** — Mood state system: `getMoodState(pet, now)` derives a visible mood label and emoji (Sick/Grumpy/Sleepy/Sad/Lonely/Bored/Happy/Content) from current stats and time since last interaction. Displayed in the `/pet status` embed description.
+- **Issue 008** — `/pet daily` command: once per UTC day per server, awards 50 XP and 5 treats. Cooldown reply shows hours/minutes until next reset. Treats balance shown in status embed.
 
 ## Planned Features (Issues 007–011)
 
-**Issue 007 — Mood State System** ✅ Resolved
-See resolved issues above.
+**Issue 007 — Mood State System** ✅ Resolved — See resolved issues.
+
+**Issue 008 — `/daily` Command** ✅ Resolved — See resolved issues.
 
 **Issue 008 — `/daily` Command**
 Once per calendar day per server, any user can claim a reward: a fixed XP amount and a small number of treats (currency). Re-running before reset replies ephemerally with a cooldown timer. Requires a `last_daily` timestamp column in the pets table.
