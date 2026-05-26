@@ -1,12 +1,15 @@
 jest.mock('../../database/db', () => ({
-  getPet:    jest.fn(),
-  createPet: jest.fn(),
-  deletePet: jest.fn(),
-  clamp:     jest.fn((v) => Math.max(0, Math.min(100, Math.round(v)))),
+  getPet:         jest.fn(),
+  createPet:      jest.fn(),
+  deletePet:      jest.fn(),
+  updateStat:     jest.fn(),
+  addXP:          jest.fn(),
+  xpToNextLevel:  jest.fn((level) => level * 100),
+  clamp:          jest.fn((v) => Math.max(0, Math.min(100, Math.round(v)))),
 }));
 
 const { execute } = require('../../commands/pet');
-const { getPet, createPet, deletePet } = require('../../database/db');
+const { getPet, createPet, deletePet, updateStat, addXP } = require('../../database/db');
 const { buildMockInteraction } = require('../helpers/mockInteraction');
 
 const HEALTHY_PET = {
@@ -155,6 +158,58 @@ describe('/pet remove', () => {
 
     expect(deletePet).not.toHaveBeenCalled();
     expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// action commands (feed / play / clean / sleep)
+// ─────────────────────────────────────────────────────────────────────────────
+describe.each([
+  ['feed',  [['hunger', 20]],                    10],
+  ['play',  [['mood', 15], ['energy', -10]],      10],
+  ['clean', [['cleanliness', 20], ['mood', -5]],  10],
+  ['sleep', [['energy', 30], ['mood', -5]],        5],
+])('/pet %s', (subcommand, expectedChanges, expectedXP) => {
+  test('replies ephemerally when the server has no pet', async () => {
+    getPet.mockReturnValue(undefined);
+
+    const ix = buildMockInteraction({ subcommand });
+    await execute(ix);
+
+    expect(updateStat).not.toHaveBeenCalled();
+    expect(addXP).not.toHaveBeenCalled();
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
+  });
+
+  test('calls updateStat for each stat change', async () => {
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand });
+    await execute(ix);
+
+    for (const [stat, delta] of expectedChanges) {
+      expect(updateStat).toHaveBeenCalledWith('guild-123', stat, delta);
+    }
+  });
+
+  test(`awards ${expectedXP} XP`, async () => {
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand });
+    await execute(ix);
+
+    expect(addXP).toHaveBeenCalledWith('guild-123', expectedXP);
+  });
+
+  test('replies with an embed showing the updated status', async () => {
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand });
+    await execute(ix);
+
+    expect(ix.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ embeds: expect.any(Array) }),
+    );
   });
 });
 

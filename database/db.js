@@ -38,10 +38,33 @@ function deletePet(guildId) {
   db.prepare('DELETE FROM pets WHERE guild_id = ?').run(guildId);
 }
 
-// TODO: updateStat(guildId, stat, delta) — apply a delta to one stat column, clamped to [0, 100];
-//       update last_updated; used by feed, play, clean, sleep commands.
+// XP required to advance from `level` to `level + 1`
+function xpToNextLevel(level) {
+  return level * 100;
+}
 
-// TODO: addXP(guildId, amount) — add XP to the pet and trigger a level-up when the threshold
-//       is reached (define a level → XP threshold table here).
+const VALID_STATS = new Set(['hunger', 'mood', 'energy', 'cleanliness']);
 
-module.exports = { getPet, createPet, deletePet, clamp };
+function updateStat(guildId, stat, delta) {
+  if (!VALID_STATS.has(stat)) throw new Error(`Invalid stat: ${stat}`);
+  const pet = getPet(guildId);
+  if (!pet) return;
+  const newVal = clamp(pet[stat] + delta);
+  db.prepare(`UPDATE pets SET ${stat} = ?, last_updated = ? WHERE guild_id = ?`)
+    .run(newVal, Date.now(), guildId);
+}
+
+function addXP(guildId, amount) {
+  const pet = getPet(guildId);
+  if (!pet) return;
+  let { xp, level } = pet;
+  xp += amount;
+  while (xp >= xpToNextLevel(level)) {
+    xp -= xpToNextLevel(level);
+    level++;
+  }
+  db.prepare('UPDATE pets SET xp = ?, level = ?, last_updated = ? WHERE guild_id = ?')
+    .run(xp, level, Date.now(), guildId);
+}
+
+module.exports = { getPet, createPet, deletePet, updateStat, addXP, xpToNextLevel, clamp };

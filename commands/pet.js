@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const { getPet, createPet, deletePet } = require('../database/db');
+const { getPet, createPet, deletePet, updateStat, addXP, xpToNextLevel } = require('../database/db');
 
 const SPECIES_EMOJI = {
   cat:          '🐱',
@@ -24,9 +24,46 @@ function statBar(value) {
   return '█'.repeat(filled) + '░'.repeat(10 - filled) + ` ${value}/100`;
 }
 
+// Renders an XP progress bar toward the next level
+function xpBar(xp, level) {
+  const needed = xpToNextLevel(level);
+  const filled = Math.round((xp / needed) * 10);
+  return '█'.repeat(Math.max(0, filled)) + '░'.repeat(Math.max(0, 10 - filled)) + ` ${xp}/${needed}`;
+}
+
+function buildStatusEmbed(pet) {
+  const emoji = speciesEmoji(pet.species);
+  const avg   = Math.round((pet.hunger + pet.mood + pet.energy + pet.cleanliness) / 4);
+  const color = avg >= 70 ? 0x57f287 : avg >= 40 ? 0xfee75c : 0xed4245;
+
+  return new EmbedBuilder()
+    .setColor(color)
+    .setTitle(`${emoji} ${pet.pet_name}`)
+    .setDescription(`*A level ${pet.level} ${pet.species}*`)
+    .addFields(
+      { name: '🍖 Hunger',      value: statBar(pet.hunger),          inline: false },
+      { name: '😊 Mood',        value: statBar(pet.mood),            inline: false },
+      { name: '⚡ Energy',       value: statBar(pet.energy),          inline: false },
+      { name: '🛁 Cleanliness', value: statBar(pet.cleanliness),     inline: false },
+      { name: '⭐ Level',        value: `${pet.level}`,               inline: true  },
+      { name: '✨ XP',           value: xpBar(pet.xp, pet.level),    inline: true  },
+    )
+    .setFooter({ text: `Last updated • ${new Date(pet.last_updated).toLocaleString()}` });
+}
+
+// Stat changes and XP reward for each action subcommand
+const ACTION_MAP = {
+  feed:  { changes: [['hunger', +20]],                    xp: 10, verb: 'fed',          emoji: '🍖' },
+  play:  { changes: [['mood', +15], ['energy', -10]],     xp: 10, verb: 'played with',  emoji: '🎾' },
+  clean: { changes: [['cleanliness', +20], ['mood', -5]], xp: 10, verb: 'cleaned',      emoji: '🛁' },
+  sleep: { changes: [['energy', +30], ['mood', -5]],      xp: 5,  verb: 'put to sleep', emoji: '💤' },
+};
+
 module.exports = {
-  statBar,       // exported for unit testing
-  speciesEmoji,  // exported for unit testing
+  statBar,
+  speciesEmoji,
+  xpBar,
+  buildStatusEmbed,
   data: new SlashCommandBuilder()
     .setName('pet')
     .setDescription('Manage your server pet')
@@ -81,6 +118,18 @@ module.exports = {
             .setDescription('Type the pet\'s name to confirm removal')
             .setRequired(true),
         ),
+    )
+    .addSubcommand(sub =>
+      sub.setName('feed').setDescription('Feed your pet to restore hunger'),
+    )
+    .addSubcommand(sub =>
+      sub.setName('play').setDescription('Play with your pet to boost mood'),
+    )
+    .addSubcommand(sub =>
+      sub.setName('clean').setDescription('Bathe your pet to restore cleanliness'),
+    )
+    .addSubcommand(sub =>
+      sub.setName('sleep').setDescription('Let your pet sleep to restore energy'),
     ),
 
   async execute(interaction) {
@@ -94,6 +143,27 @@ module.exports = {
     }
 
     const sub = interaction.options.getSubcommand();
+
+    // ── action commands (feed / play / clean / sleep) ─────────────────────────
+    const action = ACTION_MAP[sub];
+    if (action) {
+      const pet = getPet(guildId);
+      if (!pet) {
+        return interaction.reply({
+          content: "This server doesn't have a pet yet! Use `/pet adopt` to get one.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      for (const [stat, delta] of action.changes) {
+        updateStat(guildId, stat, delta);
+      }
+      addXP(guildId, action.xp);
+      const updated = getPet(guildId);
+      return interaction.reply({
+        content: `You ${action.verb} **${pet.pet_name}**! ${action.emoji}`,
+        embeds: [buildStatusEmbed(updated)],
+      });
+    }
 
     // ── /pet adopt ────────────────────────────────────────────────────────────
     if (sub === 'adopt') {
@@ -167,29 +237,7 @@ module.exports = {
           flags: MessageFlags.Ephemeral,
         });
       }
-
-      const emoji = speciesEmoji(pet.species);
-
-      // Embed color reflects overall health: green → yellow → red
-      const avg   = Math.round((pet.hunger + pet.mood + pet.energy + pet.cleanliness) / 4);
-      const color = avg >= 70 ? 0x57f287 : avg >= 40 ? 0xfee75c : 0xed4245;
-
-      const embed = new EmbedBuilder()
-        .setColor(color)
-        .setTitle(`${emoji} ${pet.pet_name}`)
-        .setDescription(`*A level ${pet.level} ${pet.species}*`)
-        .addFields(
-          { name: '🍖 Hunger',      value: statBar(pet.hunger),      inline: false },
-          { name: '😊 Mood',        value: statBar(pet.mood),        inline: false },
-          { name: '⚡ Energy',       value: statBar(pet.energy),      inline: false },
-          { name: '🛁 Cleanliness', value: statBar(pet.cleanliness), inline: false },
-          { name: '⭐ Level',        value: `${pet.level}`,           inline: true  },
-          { name: '✨ XP',           value: `${pet.xp}`,              inline: true  },
-          // TODO: Add an XP progress bar toward next level once leveling thresholds are defined
-        )
-        .setFooter({ text: `Last updated • ${new Date(pet.last_updated).toLocaleString()}` });
-
-      return interaction.reply({ embeds: [embed] });
+      return interaction.reply({ embeds: [buildStatusEmbed(pet)] });
     }
   },
 };

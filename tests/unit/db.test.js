@@ -2,7 +2,7 @@
 // Must be set before the module is first required.
 process.env.TEST_DB_PATH = ':memory:';
 
-const { getPet, createPet, deletePet, clamp } = require('../../database/db');
+const { getPet, createPet, deletePet, updateStat, addXP, xpToNextLevel, clamp } = require('../../database/db');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // deletePet()
@@ -150,5 +150,101 @@ describe('createPet()', () => {
     createPet('guild-multi-b', 'Beta',  'dog');
     expect(getPet('guild-multi-a').pet_name).toBe('Alpha');
     expect(getPet('guild-multi-b').pet_name).toBe('Beta');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// xpToNextLevel()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('xpToNextLevel()', () => {
+  test('level 1 requires 100 XP', () => expect(xpToNextLevel(1)).toBe(100));
+  test('level 2 requires 200 XP', () => expect(xpToNextLevel(2)).toBe(200));
+  test('level 5 requires 500 XP', () => expect(xpToNextLevel(5)).toBe(500));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// updateStat()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('updateStat()', () => {
+  test('increases a stat by the given delta', () => {
+    createPet('guild-us-1', 'Buddy', 'dog');
+    updateStat('guild-us-1', 'hunger', +20);
+    expect(getPet('guild-us-1').hunger).toBe(100);
+  });
+
+  test('decreases a stat by the given delta', () => {
+    createPet('guild-us-2', 'Buddy', 'dog');
+    updateStat('guild-us-2', 'energy', -30);
+    expect(getPet('guild-us-2').energy).toBe(50);
+  });
+
+  test('clamps stat at 100 when delta would exceed it', () => {
+    createPet('guild-us-3', 'Buddy', 'dog');
+    updateStat('guild-us-3', 'mood', +999);
+    expect(getPet('guild-us-3').mood).toBe(100);
+  });
+
+  test('clamps stat at 0 when delta would go negative', () => {
+    createPet('guild-us-4', 'Buddy', 'dog');
+    updateStat('guild-us-4', 'cleanliness', -999);
+    expect(getPet('guild-us-4').cleanliness).toBe(0);
+  });
+
+  test('throws on an invalid stat name', () => {
+    createPet('guild-us-5', 'Buddy', 'dog');
+    expect(() => updateStat('guild-us-5', 'invalid', 10)).toThrow();
+  });
+
+  test('does not affect other stats', () => {
+    createPet('guild-us-6', 'Buddy', 'dog');
+    updateStat('guild-us-6', 'hunger', +10);
+    const pet = getPet('guild-us-6');
+    expect(pet.mood).toBe(80);
+    expect(pet.energy).toBe(80);
+    expect(pet.cleanliness).toBe(80);
+  });
+
+  test('silently does nothing if the guild has no pet', () => {
+    expect(() => updateStat('guild-us-none', 'hunger', +10)).not.toThrow();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// addXP()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('addXP()', () => {
+  test('adds XP without leveling up', () => {
+    createPet('guild-xp-1', 'Buddy', 'dog');
+    addXP('guild-xp-1', 10);
+    expect(getPet('guild-xp-1').xp).toBe(10);
+    expect(getPet('guild-xp-1').level).toBe(1);
+  });
+
+  test('levels up when XP reaches the threshold', () => {
+    createPet('guild-xp-2', 'Buddy', 'dog');
+    addXP('guild-xp-2', 100);
+    const pet = getPet('guild-xp-2');
+    expect(pet.level).toBe(2);
+    expect(pet.xp).toBe(0);
+  });
+
+  test('carries over excess XP after level-up', () => {
+    createPet('guild-xp-3', 'Buddy', 'dog');
+    addXP('guild-xp-3', 110);
+    const pet = getPet('guild-xp-3');
+    expect(pet.level).toBe(2);
+    expect(pet.xp).toBe(10);
+  });
+
+  test('can level up multiple times in one call', () => {
+    createPet('guild-xp-4', 'Buddy', 'dog');
+    addXP('guild-xp-4', 300);
+    const pet = getPet('guild-xp-4');
+    expect(pet.level).toBe(3);
+    expect(pet.xp).toBe(0);
+  });
+
+  test('silently does nothing if the guild has no pet', () => {
+    expect(() => addXP('guild-xp-none', 10)).not.toThrow();
   });
 });

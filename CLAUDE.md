@@ -21,10 +21,34 @@ npm start        # start the bot
 
 ## Architecture
 
-- **`index.js`** — Creates the `Client`, auto-loads all files from `commands/` into a `Collection`, and dispatches `interactionCreate` events to the matching command's `execute()`.
+- **`index.js`** — Creates the `Client`, auto-loads all files from `commands/` into a `Collection`, and dispatches `interactionCreate` events to the matching command's `execute()`. Includes a client-level error handler and a wrapped error reply to prevent crashes on expired interactions.
 - **`deploy-commands.js`** — One-shot script that POSTs slash command schemas to Discord's REST API. Set `GUILD_ID` for instant guild-scoped registration during development; omit for global.
-- **`commands/pet.js`** — Defines the `/pet` command tree. Subcommands branch inside a single `execute()` on `interaction.options.getSubcommand()`.
-- **`database/db.js`** — Opens `pets.db`, creates the `pets` table if needed, and exports synchronous helper functions. All stat values must go through `clamp()` before being written.
+- **`commands/pet.js`** — Defines the `/pet` command tree. Subcommands branch inside a single `execute()` on `interaction.options.getSubcommand()`. Action subcommands (feed/play/clean/sleep) are driven by `ACTION_MAP`. Status embed is built by the shared `buildStatusEmbed()` helper so all commands display the same layout.
+- **`database/db.js`** — Opens `pets.db`, creates the `pets` table if needed, and exports synchronous helper functions. All stat values go through `clamp()`. XP leveling uses `xpToNextLevel(level) = level * 100`.
+
+## Implemented Commands
+
+| Command | Description |
+|---|---|
+| `/pet adopt` | Adopt a new pet (name + species). One per server. Supports custom species. |
+| `/pet status` | Display current stats, level, and XP progress bar. Color-coded by average health. |
+| `/pet remove` | Permanently remove the server's pet. Requires typing the pet's name to confirm. |
+| `/pet feed` | Hunger +20, XP +10. Shows updated status embed. |
+| `/pet play` | Mood +15, Energy -10, XP +10. Shows updated status embed. |
+| `/pet clean` | Cleanliness +20, Mood -5, XP +10. Shows updated status embed. |
+| `/pet sleep` | Energy +30, Mood -5, XP +5. Shows updated status embed. |
+
+## Database Layer (`database/db.js`)
+
+| Function | Description |
+|---|---|
+| `getPet(guildId)` | Returns the pet row or undefined. |
+| `createPet(guildId, name, species)` | Inserts a new pet with all stats at 80. |
+| `deletePet(guildId)` | Removes the pet row. |
+| `updateStat(guildId, stat, delta)` | Applies a delta to one stat column, clamped to [0, 100]. |
+| `addXP(guildId, amount)` | Adds XP and triggers level-ups. Excess XP carries over. |
+| `xpToNextLevel(level)` | Returns `level * 100` — XP needed to advance from `level` to `level + 1`. |
+| `clamp(val)` | Clamps and rounds a value to [0, 100]. |
 
 ## Pets Table Schema
 
@@ -49,14 +73,22 @@ Stats are always clamped to `[0, 100]`. Use `clamp()` from `database/db.js` when
 2. Run `npm run deploy` to register the new command schema with Discord.
    `index.js` auto-loads all `.js` files in `commands/` — no manual registration needed there.
 
+## Testing
+
+```bash
+npm test
+```
+
+135 tests across 6 suites (all passing). Tests use an in-memory SQLite database via `TEST_DB_PATH=:memory:` so they never touch `pets.db` on disk.
+
 ## Resolved Issues
 
-- **Issue 001** — DM guard: bot now rejects `/pet` commands sent via DM (`guildId` null check at top of `execute()`).
+- **Issue 001** — DM guard: bot now rejects all `/pet` commands sent via DM (`guildId` null check at top of `execute()`).
+- **Issue 002** — Bot crash on expired interaction: error handler reply is now wrapped in a second try/catch so a failed followUp no longer throws an unhandled error that kills the process.
+- **Issue 003** — Deprecation warnings: replaced `ephemeral: true` with `MessageFlags.Ephemeral`, renamed `ready` event to `clientReady`, and added a `client.on('error')` handler.
+- **Issue 004** — `better-sqlite3` native binding failure on Node.js v26: upgraded from v9.6.0 to v12.x which supports Node 26.
 
 ## Planned Features (TODOs)
 
-The following are stubbed with `// TODO` comments and not yet implemented:
-- `database/db.js`: `updateStat(guildId, stat, delta)` — used by feed, play, clean, sleep
-- `database/db.js`: `addXP(guildId, amount)` — XP gain + level-up logic
-- `commands/pet.js` status embed: XP progress bar toward next level
-- Future subcommands: `feed`, `play`, `clean`, `sleep`, `rename`
+- **Stat decay** — hunger/mood/energy/cleanliness should slowly decrease over time so the pet needs regular care from members.
+- **`/pet rename`** — lets the server rename their pet.
