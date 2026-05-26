@@ -24,6 +24,20 @@ function statBar(value) {
   return '█'.repeat(filled) + '░'.repeat(10 - filled) + ` ${value}/100`;
 }
 
+// Derives a mood label and emoji from current stats and time since last interaction
+function getMoodState(pet, now = Date.now()) {
+  const hoursSince = (now - pet.last_updated) / (1000 * 60 * 60);
+
+  if (pet.cleanliness < 20)                        return { label: 'Sick',    emoji: '🤢' };
+  if (pet.hunger      < 20)                        return { label: 'Grumpy',  emoji: '😠' };
+  if (pet.energy      < 20)                        return { label: 'Sleepy',  emoji: '😴' };
+  if (pet.mood < 30 || hoursSince > 24)            return { label: 'Sad',     emoji: '😢' };
+  if (hoursSince > 8)                              return { label: 'Lonely',  emoji: '🥺' };
+  if (pet.mood < 50)                               return { label: 'Bored',   emoji: '😐' };
+  if (pet.mood >= 70 && pet.hunger >= 50 && pet.energy >= 50) return { label: 'Happy', emoji: '😊' };
+  return { label: 'Content', emoji: '😌' };
+}
+
 // Renders an XP progress bar toward the next level
 function xpBar(xp, level) {
   const needed = xpToNextLevel(level);
@@ -32,14 +46,15 @@ function xpBar(xp, level) {
 }
 
 function buildStatusEmbed(pet) {
-  const emoji = speciesEmoji(pet.species);
-  const avg   = Math.round((pet.hunger + pet.mood + pet.energy + pet.cleanliness) / 4);
-  const color = avg >= 70 ? 0x57f287 : avg >= 40 ? 0xfee75c : 0xed4245;
+  const emoji     = speciesEmoji(pet.species);
+  const avg       = Math.round((pet.hunger + pet.mood + pet.energy + pet.cleanliness) / 4);
+  const color     = avg >= 70 ? 0x57f287 : avg >= 40 ? 0xfee75c : 0xed4245;
+  const moodState = getMoodState(pet);
 
   return new EmbedBuilder()
     .setColor(color)
     .setTitle(`${emoji} ${pet.pet_name}`)
-    .setDescription(`*A level ${pet.level} ${pet.species}*`)
+    .setDescription(`*A level ${pet.level} ${pet.species}* • ${moodState.emoji} ${moodState.label}`)
     .addFields(
       { name: '🍖 Hunger',      value: statBar(pet.hunger),          inline: false },
       { name: '😊 Mood',        value: statBar(pet.mood),            inline: false },
@@ -63,6 +78,7 @@ module.exports = {
   statBar,
   speciesEmoji,
   xpBar,
+  getMoodState,
   buildStatusEmbed,
   data: new SlashCommandBuilder()
     .setName('pet')

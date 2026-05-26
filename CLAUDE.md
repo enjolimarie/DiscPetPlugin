@@ -91,17 +91,12 @@ npm test
 - **Issue 004** — `better-sqlite3` native binding failure on Node.js v26: upgraded from v9.6.0 to v12.x which supports Node 26.
 - **Issue 005** — Stats were permanently frozen at their initial values; stat decay now reduces hunger/mood/energy/cleanliness over time.
 - **Issue 006** — No way to rename a pet after adoption; `/pet rename` now allows the server to update the pet's name at any time.
+- **Issue 007** — Mood state system: `getMoodState(pet, now)` derives a visible mood label and emoji (Sick/Grumpy/Sleepy/Sad/Lonely/Bored/Happy/Content) from current stats and time since last interaction. Displayed in the `/pet status` embed description.
 
 ## Planned Features (Issues 007–011)
 
-**Issue 007 — Mood State System**
-Derive a visible mood label from the pet's current stat values and display it in `/pet status`. No new database column needed — the label is a pure display calculation. Example mapping:
-- Happy: mood ≥ 70 and hunger ≥ 50 and energy ≥ 50
-- Bored: hasn't been played with today (no play action since midnight)
-- Sleepy: energy < 20
-- Grumpy: hunger < 20
-- Sick: cleanliness < 20
-- Sad/Lonely: mood < 30 or no interaction in over 24 hours
+**Issue 007 — Mood State System** ✅ Resolved
+See resolved issues above.
 
 **Issue 008 — `/daily` Command**
 Once per calendar day per server, any user can claim a reward: a fixed XP amount and a small number of treats (currency). Re-running before reset replies ephemerally with a cooldown timer. Requires a `last_daily` timestamp column in the pets table.
