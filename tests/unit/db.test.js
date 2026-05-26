@@ -2,7 +2,7 @@
 // Must be set before the module is first required.
 process.env.TEST_DB_PATH = ':memory:';
 
-const { getPet, createPet, deletePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, clamp } = require('../../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, clamp } = require('../../database/db');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // deletePet()
@@ -150,6 +150,39 @@ describe('createPet()', () => {
     createPet('guild-multi-b', 'Beta',  'dog');
     expect(getPet('guild-multi-a').pet_name).toBe('Alpha');
     expect(getPet('guild-multi-b').pet_name).toBe('Beta');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// renamePet()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('renamePet()', () => {
+  test('updates the pet name', () => {
+    createPet('guild-rn-1', 'OldName', 'cat');
+    renamePet('guild-rn-1', 'NewName');
+    expect(getPet('guild-rn-1').pet_name).toBe('NewName');
+  });
+
+  test('does not affect other columns', () => {
+    createPet('guild-rn-2', 'Buddy', 'dog');
+    renamePet('guild-rn-2', 'Rex');
+    const pet = getPet('guild-rn-2');
+    expect(pet.species).toBe('dog');
+    expect(pet.hunger).toBe(80);
+    expect(pet.level).toBe(1);
+  });
+
+  test('returns the updated pet', () => {
+    createPet('guild-rn-3', 'Before', 'hamster');
+    const pet = renamePet('guild-rn-3', 'After');
+    expect(pet.pet_name).toBe('After');
+  });
+
+  test('does not affect other guilds', () => {
+    createPet('guild-rn-4a', 'Alice', 'cat');
+    createPet('guild-rn-4b', 'Bob',   'dog');
+    renamePet('guild-rn-4a', 'Alicia');
+    expect(getPet('guild-rn-4b').pet_name).toBe('Bob');
   });
 });
 

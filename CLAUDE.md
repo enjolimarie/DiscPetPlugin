@@ -37,6 +37,7 @@ npm start        # start the bot
 | `/pet play` | Mood +15, Energy -10, XP +10. Shows updated status embed. |
 | `/pet clean` | Cleanliness +20, Mood -5, XP +10. Shows updated status embed. |
 | `/pet sleep` | Energy +30, Mood -5, XP +5. Shows updated status embed. |
+| `/pet rename` | Give the server pet a new name. |
 
 ## Database Layer (`database/db.js`)
 
@@ -45,6 +46,7 @@ npm start        # start the bot
 | `getPet(guildId)` | Returns the pet row or undefined. |
 | `createPet(guildId, name, species)` | Inserts a new pet with all stats at 80. |
 | `deletePet(guildId)` | Removes the pet row. |
+| `renamePet(guildId, newName)` | Updates the pet's name and returns the updated row. |
 | `updateStat(guildId, stat, delta)` | Applies a delta to one stat column, clamped to [0, 100]. |
 | `addXP(guildId, amount)` | Adds XP and triggers level-ups. Excess XP carries over. |
 | `xpToNextLevel(level)` | Returns `level * 100` — XP needed to advance from `level` to `level + 1`. |
@@ -87,8 +89,9 @@ npm test
 - **Issue 002** — Bot crash on expired interaction: error handler reply is now wrapped in a second try/catch so a failed followUp no longer throws an unhandled error that kills the process.
 - **Issue 003** — Deprecation warnings: replaced `ephemeral: true` with `MessageFlags.Ephemeral`, renamed `ready` event to `clientReady`, and added a `client.on('error')` handler.
 - **Issue 004** — `better-sqlite3` native binding failure on Node.js v26: upgraded from v9.6.0 to v12.x which supports Node 26.
+- **Issue 005** — Stats were permanently frozen at their initial values; stat decay now reduces hunger/mood/energy/cleanliness over time.
+- **Issue 006** — No way to rename a pet after adoption; `/pet rename` now allows the server to update the pet's name at any time.
 
 ## Planned Features (TODOs)
 
-- **Stat decay** — hunger/mood/energy/cleanliness should slowly decrease over time so the pet needs regular care from members.
-- **`/pet rename`** — lets the server rename their pet.
+No outstanding TODOs at this time.

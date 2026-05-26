@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const { getPet, createPet, deletePet, updateStat, addXP, xpToNextLevel, applyDecay } = require('../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay } = require('../database/db');
 
 const SPECIES_EMOJI = {
   cat:          '🐱',
@@ -120,6 +120,17 @@ module.exports = {
         ),
     )
     .addSubcommand(sub =>
+      sub
+        .setName('rename')
+        .setDescription('Give your pet a new name')
+        .addStringOption(opt =>
+          opt
+            .setName('name')
+            .setDescription('The new name for your pet')
+            .setRequired(true),
+        ),
+    )
+    .addSubcommand(sub =>
       sub.setName('feed').setDescription('Feed your pet to restore hunger'),
     )
     .addSubcommand(sub =>
@@ -162,6 +173,31 @@ module.exports = {
       return interaction.reply({
         content: `You ${action.verb} **${pet.pet_name}**! ${action.emoji}`,
         embeds: [buildStatusEmbed(updated)],
+      });
+    }
+
+    // ── /pet rename ───────────────────────────────────────────────────────────
+    if (sub === 'rename') {
+      const pet = getPet(guildId);
+      if (!pet) {
+        return interaction.reply({
+          content: "This server doesn't have a pet yet! Use `/pet adopt` to get one.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      const newName = interaction.options.getString('name').trim();
+      if (!newName) {
+        return interaction.reply({
+          content: 'Please provide a valid name.',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      const oldName = pet.pet_name;
+      renamePet(guildId, newName);
+      return interaction.reply({
+        content: `**${oldName}** has been renamed to **${newName}**! 📝`,
       });
     }
 

@@ -2,6 +2,7 @@ jest.mock('../../database/db', () => ({
   getPet:         jest.fn(),
   createPet:      jest.fn(),
   deletePet:      jest.fn(),
+  renamePet:      jest.fn(),
   updateStat:     jest.fn(),
   addXP:          jest.fn(),
   applyDecay:     jest.fn(),
@@ -10,7 +11,7 @@ jest.mock('../../database/db', () => ({
 }));
 
 const { execute } = require('../../commands/pet');
-const { getPet, createPet, deletePet, updateStat, addXP, applyDecay } = require('../../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, applyDecay } = require('../../database/db');
 const { buildMockInteraction } = require('../helpers/mockInteraction');
 
 const HEALTHY_PET = {
@@ -158,6 +159,52 @@ describe('/pet remove', () => {
     await execute(ix);
 
     expect(deletePet).not.toHaveBeenCalled();
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /pet rename
+// ─────────────────────────────────────────────────────────────────────────────
+describe('/pet rename', () => {
+  test('replies ephemerally when the server has no pet', async () => {
+    getPet.mockReturnValue(undefined);
+
+    const ix = buildMockInteraction({ subcommand: 'rename', options: { name: 'NewName' } });
+    await execute(ix);
+
+    expect(renamePet).not.toHaveBeenCalled();
+    expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
+  });
+
+  test('renames the pet and confirms with both old and new names', async () => {
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand: 'rename', options: { name: 'NewName' } });
+    await execute(ix);
+
+    expect(renamePet).toHaveBeenCalledWith('guild-123', 'NewName');
+    const content = ix.reply.mock.calls[0][0].content;
+    expect(content).toContain('Buddy');
+    expect(content).toContain('NewName');
+  });
+
+  test('trims whitespace from the new name', async () => {
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand: 'rename', options: { name: '  Fluffy  ' } });
+    await execute(ix);
+
+    expect(renamePet).toHaveBeenCalledWith('guild-123', 'Fluffy');
+  });
+
+  test('replies ephemerally when the trimmed name is empty', async () => {
+    getPet.mockReturnValue(HEALTHY_PET);
+
+    const ix = buildMockInteraction({ subcommand: 'rename', options: { name: '   ' } });
+    await execute(ix);
+
+    expect(renamePet).not.toHaveBeenCalled();
     expect(ix.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: 64 }));
   });
 });

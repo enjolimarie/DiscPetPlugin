@@ -38,6 +38,12 @@ function deletePet(guildId) {
   db.prepare('DELETE FROM pets WHERE guild_id = ?').run(guildId);
 }
 
+function renamePet(guildId, newName) {
+  db.prepare('UPDATE pets SET pet_name = ?, last_updated = ? WHERE guild_id = ?')
+    .run(newName, Date.now(), guildId);
+  return getPet(guildId);
+}
+
 // XP required to advance from `level` to `level + 1`
 function xpToNextLevel(level) {
   return level * 100;
@@ -95,4 +101,4 @@ function addXP(guildId, amount) {
     .run(xp, level, Date.now(), guildId);
 }
 
-module.exports = { getPet, createPet, deletePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, clamp };
+module.exports = { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, clamp };
