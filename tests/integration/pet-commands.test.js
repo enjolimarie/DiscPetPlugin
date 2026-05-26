@@ -1,20 +1,21 @@
 jest.mock('../../database/db', () => ({
-  getPet:         jest.fn(),
-  createPet:      jest.fn(),
-  deletePet:      jest.fn(),
-  renamePet:      jest.fn(),
-  updateStat:     jest.fn(),
-  addXP:          jest.fn(),
-  applyDecay:     jest.fn(),
-  claimDaily:     jest.fn(),
-  spendTreats:    jest.fn(),
-  xpToNextLevel:  jest.fn((level) => {
+  getPet:            jest.fn(),
+  createPet:         jest.fn(),
+  deletePet:         jest.fn(),
+  renamePet:         jest.fn(),
+  updateStat:        jest.fn(),
+  addXP:             jest.fn(),
+  applyDecay:        jest.fn(),
+  claimDaily:        jest.fn(),
+  spendTreats:       jest.fn(),
+  streakMultiplier:  jest.fn((s) => s >= 30 ? 2 : s >= 7 ? 1.5 : 1),
+  xpToNextLevel:     jest.fn((level) => {
     if (level <= 5)  return 100;
     if (level <= 15) return 250;
     if (level <= 30) return 500;
     return 1000;
   }),
-  clamp:          jest.fn((v) => Math.max(0, Math.min(100, Math.round(v)))),
+  clamp:             jest.fn((v) => Math.max(0, Math.min(100, Math.round(v)))),
 }));
 
 const { execute } = require('../../commands/pet');
@@ -33,6 +34,7 @@ const HEALTHY_PET = {
   xp:           0,
   treats:       0,
   last_daily:   0,
+  streak:       1,
   last_updated: Date.now(),
 };
 
@@ -186,7 +188,7 @@ describe('/pet daily', () => {
   });
 
   test('replies with reward content and embed on successful claim', async () => {
-    claimDaily.mockReturnValue({ claimed: true, xp: 50, treats: 5, pet: HEALTHY_PET });
+    claimDaily.mockReturnValue({ claimed: true, xp: 50, treats: 5, streak: 1, multiplier: 1, pet: HEALTHY_PET });
 
     const ix = buildMockInteraction({ subcommand: 'daily' });
     await execute(ix);
@@ -198,7 +200,7 @@ describe('/pet daily', () => {
   });
 
   test('reward message includes XP and treat amounts', async () => {
-    claimDaily.mockReturnValue({ claimed: true, xp: 50, treats: 5, pet: HEALTHY_PET });
+    claimDaily.mockReturnValue({ claimed: true, xp: 50, treats: 5, streak: 1, multiplier: 1, pet: HEALTHY_PET });
 
     const ix = buildMockInteraction({ subcommand: 'daily' });
     await execute(ix);
@@ -206,6 +208,26 @@ describe('/pet daily', () => {
     const content = ix.reply.mock.calls[0][0].content;
     expect(content).toContain('50');
     expect(content).toContain('5');
+  });
+
+  test('streak message shown when streak > 1', async () => {
+    claimDaily.mockReturnValue({ claimed: true, xp: 50, treats: 5, streak: 3, multiplier: 1, pet: HEALTHY_PET });
+
+    const ix = buildMockInteraction({ subcommand: 'daily' });
+    await execute(ix);
+
+    const content = ix.reply.mock.calls[0][0].content;
+    expect(content).toContain('3-day streak');
+  });
+
+  test('bonus multiplier shown at streak 7+', async () => {
+    claimDaily.mockReturnValue({ claimed: true, xp: 75, treats: 8, streak: 7, multiplier: 1.5, pet: HEALTHY_PET });
+
+    const ix = buildMockInteraction({ subcommand: 'daily' });
+    await execute(ix);
+
+    const content = ix.reply.mock.calls[0][0].content;
+    expect(content).toContain('1.5×');
   });
 
   test('replies ephemerally with cooldown message when already claimed', async () => {

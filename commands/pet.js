@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, claimDaily, spendTreats } = require('../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, claimDaily, spendTreats, streakMultiplier } = require('../database/db');
 
 const SPECIES_EMOJI = {
   cat:          '🐱',
@@ -71,6 +71,7 @@ function buildStatusEmbed(pet) {
       { name: '⭐ Level',        value: `${pet.level}`,               inline: true  },
       { name: '✨ XP',           value: xpBar(pet.xp, pet.level),    inline: true  },
       { name: '🍬 Treats',       value: `${pet.treats ?? 0}`,        inline: true  },
+      { name: '🔥 Streak',       value: `${pet.streak ?? 1} day${(pet.streak ?? 1) !== 1 ? 's' : ''}`, inline: true },
     )
     .setFooter({ text: `Last updated • ${new Date(pet.last_updated).toLocaleString()}` });
 }
@@ -280,8 +281,11 @@ module.exports = {
         });
       }
 
+      const streakLine = result.streak > 1
+        ? ` 🔥 **${result.streak}-day streak!**${result.multiplier > 1 ? ` (${result.multiplier}× bonus)` : ''}`
+        : '';
       return interaction.reply({
-        content: `🎁 Daily reward claimed! **${result.pet.pet_name}** received **+${result.xp} XP** and **+${result.treats} treats**!`,
+        content: `🎁 Daily reward claimed! **${result.pet.pet_name}** received **+${result.xp} XP** and **+${result.treats} treats**!${streakLine}`,
         embeds: [buildStatusEmbed(result.pet)],
       });
     }

@@ -2,7 +2,7 @@
 // Must be set before the module is first required.
 process.env.TEST_DB_PATH = ':memory:';
 
-const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, claimDaily, DAILY_XP, DAILY_TREATS, spendTreats, clamp } = require('../../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, claimDaily, DAILY_XP, DAILY_TREATS, spendTreats, clamp, streakMultiplier } = require('../../database/db');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // deletePet()
@@ -440,5 +440,80 @@ describe('spendTreats()', () => {
     createPet('guild-st-4', 'Buddy', 'dog');
     spendTreats('guild-st-4', 0);
     expect(getPet('guild-st-4').treats).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// streakMultiplier()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('streakMultiplier()', () => {
+  test('streak 1 returns 1',    () => expect(streakMultiplier(1)).toBe(1));
+  test('streak 6 returns 1',    () => expect(streakMultiplier(6)).toBe(1));
+  test('streak 7 returns 1.5',  () => expect(streakMultiplier(7)).toBe(1.5));
+  test('streak 29 returns 1.5', () => expect(streakMultiplier(29)).toBe(1.5));
+  test('streak 30 returns 2',   () => expect(streakMultiplier(30)).toBe(2));
+  test('streak 100 returns 2',  () => expect(streakMultiplier(100)).toBe(2));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// claimDaily() — streak tracking
+// ─────────────────────────────────────────────────────────────────────────────
+describe('claimDaily() — streak', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(()  => jest.useRealTimers());
+
+  test('first claim sets streak to 1', () => {
+    createPet('guild-streak-1', 'Buddy', 'dog');
+    const result = claimDaily('guild-streak-1');
+    expect(result.streak).toBe(1);
+    expect(getPet('guild-streak-1').streak).toBe(1);
+  });
+
+  test('consecutive day increments streak to 2', () => {
+    createPet('guild-streak-2', 'Buddy', 'dog');
+    claimDaily('guild-streak-2');
+    jest.advanceTimersByTime(25 * 60 * 60 * 1000);
+    const result = claimDaily('guild-streak-2');
+    expect(result.streak).toBe(2);
+  });
+
+  test('missing a day resets streak to 1', () => {
+    createPet('guild-streak-3', 'Buddy', 'dog');
+    claimDaily('guild-streak-3');
+    jest.advanceTimersByTime(49 * 60 * 60 * 1000); // skip two days
+    const result = claimDaily('guild-streak-3');
+    expect(result.streak).toBe(1);
+  });
+
+  test('streak 7 applies 1.5× multiplier to XP and treats', () => {
+    createPet('guild-streak-4', 'Buddy', 'dog');
+    // Build up a 6-day streak
+    for (let i = 0; i < 6; i++) {
+      claimDaily('guild-streak-4');
+      jest.advanceTimersByTime(25 * 60 * 60 * 1000);
+    }
+    const result = claimDaily('guild-streak-4');
+    expect(result.streak).toBe(7);
+    expect(result.multiplier).toBe(1.5);
+    expect(result.xp).toBe(Math.round(DAILY_XP * 1.5));
+    expect(result.treats).toBe(Math.round(DAILY_TREATS * 1.5));
+  });
+
+  test('no streak multiplier below 7 days', () => {
+    createPet('guild-streak-5', 'Buddy', 'dog');
+    claimDaily('guild-streak-5');
+    jest.advanceTimersByTime(25 * 60 * 60 * 1000);
+    const result = claimDaily('guild-streak-5');
+    expect(result.multiplier).toBe(1);
+    expect(result.xp).toBe(DAILY_XP);
+    expect(result.treats).toBe(DAILY_TREATS);
+  });
+
+  test('cooldown reply does not change streak', () => {
+    createPet('guild-streak-6', 'Buddy', 'dog');
+    claimDaily('guild-streak-6');
+    const cooldown = claimDaily('guild-streak-6');
+    expect(cooldown.claimed).toBe(false);
+    expect(getPet('guild-streak-6').streak).toBe(1);
   });
 });

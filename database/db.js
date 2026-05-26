@@ -21,8 +21,9 @@ db.exec(`
 
 // Add new columns to existing databases that were created before these were added
 for (const sql of [
-  'ALTER TABLE pets ADD COLUMN treats    INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE pets ADD COLUMN treats     INTEGER NOT NULL DEFAULT 0',
   'ALTER TABLE pets ADD COLUMN last_daily INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE pets ADD COLUMN streak     INTEGER NOT NULL DEFAULT 1',
 ]) {
   try { db.exec(sql); } catch { /* column already exists */ }
 }
@@ -124,6 +125,12 @@ function spendTreats(guildId, amount) {
 const DAILY_XP     = 50;
 const DAILY_TREATS = 5;
 
+function streakMultiplier(streak) {
+  if (streak >= 30) return 2;
+  if (streak >= 7)  return 1.5;
+  return 1;
+}
+
 function claimDaily(guildId) {
   const pet = getPet(guildId);
   if (!pet) return null;
@@ -138,16 +145,30 @@ function claimDaily(guildId) {
     last.getUTCDate()     === curr.getUTCDate();
 
   if (alreadyClaimed) {
-    const nextMidnight = new Date();
+    const nextMidnight = new Date(now);
     nextMidnight.setUTCHours(24, 0, 0, 0);
     return { claimed: false, msUntilReset: nextMidnight.getTime() - now };
   }
 
-  addXP(guildId, DAILY_XP);
-  db.prepare('UPDATE pets SET treats = treats + ?, last_daily = ?, last_updated = ? WHERE guild_id = ?')
-    .run(DAILY_TREATS, now, now, guildId);
+  // Streak: increment if last_daily was exactly yesterday (UTC), otherwise reset to 1
+  const yesterday = new Date(now);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const wasYesterday =
+    pet.last_daily > 0 &&
+    last.getUTCFullYear() === yesterday.getUTCFullYear() &&
+    last.getUTCMonth()    === yesterday.getUTCMonth()    &&
+    last.getUTCDate()     === yesterday.getUTCDate();
 
-  return { claimed: true, xp: DAILY_XP, treats: DAILY_TREATS, pet: getPet(guildId) };
+  const newStreak  = wasYesterday ? (pet.streak ?? 1) + 1 : 1;
+  const multiplier = streakMultiplier(newStreak);
+  const xp         = Math.round(DAILY_XP     * multiplier);
+  const treats     = Math.round(DAILY_TREATS * multiplier);
+
+  addXP(guildId, xp);
+  db.prepare('UPDATE pets SET treats = treats + ?, last_daily = ?, streak = ?, last_updated = ? WHERE guild_id = ?')
+    .run(treats, now, newStreak, now, guildId);
+
+  return { claimed: true, xp, treats, streak: newStreak, multiplier, pet: getPet(guildId) };
 }
 
-module.exports = { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, claimDaily, DAILY_XP, DAILY_TREATS, spendTreats, clamp };
+module.exports = { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, claimDaily, DAILY_XP, DAILY_TREATS, spendTreats, clamp, streakMultiplier };
