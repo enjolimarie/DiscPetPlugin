@@ -110,6 +110,31 @@ npm test
 
 **Issue 009 — Shop System** ✅ Resolved — See resolved issues.
 
+**Issue 012 — Daily Tasks**
+Each UTC day a small set of tasks is generated for the server (e.g. "Play with your pet once", "Keep cleanliness above 80 for the day", "Feed your pet twice"). Completing tasks rewards treats or XP. Tasks reset at UTC midnight. Requires a `tasks` table tracking the active task list, completion state, and the date they were generated. A `/pet tasks` command shows current tasks and progress.
+
+**Issue 013 — Inventory System**
+Shop items can be stored rather than immediately used. Tracks items held per user via an `inventory` table keyed by `(guild_id, user_id)`. Commands:
+- `/pet inventory` — view your stored items
+- `/pet use item:<name>` — apply a stored item to the server pet
+Buying from the shop adds to inventory instead of applying instantly.
+
+**Issue 014 — Achievement & Badge System**
+Milestones unlock badges permanently per user. Planned badges:
+- 🍖 **First Meal** — feed the pet for the first time
+- 🛁 **Spa Day** — clean the pet 7 days in a row
+- 💀 **Survivor** — keep the pet alive for 30 days
+- 💸 **Big Spender** — spend 100 treats total in the shop
+- 💰 **Hoarder** — accumulate 50 treats at once
+- 🎮 **Playful** — play with the pet 10 times
+Requires an `achievements` table tracking `(guild_id, user_id, achievement_key, earned_at)`.
+
+**Issue 015 — User Profile**
+A `/pet profile` command (optionally `/pet profile user:@someone`) that displays a user's earned badges as a visual embed — their trophy case. Depends on Issue 014. Badge display should show earned date and a brief description for each unlocked achievement.
+
+**Issue 016 — Server vs Personal Pet Mode**
+Currently every server has one shared pet all members interact with together. This issue adds the option for each user to have their own personal pet. Would require a `mode` setting per guild (shared vs personal) and tracking pets by `(guild_id, user_id)` in personal mode. A server admin command would toggle the mode.
+
 **Issue 008 — `/daily` Command**
 Once per calendar day per server, any user can claim a reward: a fixed XP amount and a small number of treats (currency). Re-running before reset replies ephemerally with a cooldown timer. Requires a `last_daily` timestamp column in the pets table.
 
