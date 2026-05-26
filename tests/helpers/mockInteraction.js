@@ -9,6 +9,7 @@
  * @param {boolean}     opts.isChatInput  - false simulates a non-slash interaction
  * @param {boolean}     opts.replied      - simulate an already-replied interaction
  * @param {boolean}     opts.deferred     - simulate a deferred-reply interaction
+ * @param {object}      opts.user         - partial User object (id, displayName)
  */
 function buildMockInteraction({
   guildId     = 'guild-123',
@@ -18,12 +19,14 @@ function buildMockInteraction({
   isChatInput = true,
   replied     = false,
   deferred    = false,
+  user        = { id: 'user-123', displayName: 'TestUser' },
 } = {}) {
   return {
     guildId,
     commandName,
     replied,
     deferred,
+    user,
     isChatInputCommand: jest.fn().mockReturnValue(isChatInput),
     options: {
       getSubcommand: jest.fn().mockReturnValue(subcommand),

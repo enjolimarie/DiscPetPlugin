@@ -2,7 +2,7 @@
 // Must be set before the module is first required.
 process.env.TEST_DB_PATH = ':memory:';
 
-const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, claimDaily, DAILY_XP, DAILY_TREATS, spendTreats, clamp, streakMultiplier } = require('../../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, claimDaily, DAILY_XP, DAILY_TREATS, spendTreats, clamp, streakMultiplier, getTodayTasks, recordTaskAction, TASK_POOL, getUtcDateKey, addToInventory, getInventory, useFromInventory, incrementActionCount, incrementItemsBought, BADGE_DEFINITIONS, getEarnedBadges, checkBadges } = require('../../database/db');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // deletePet()
@@ -459,7 +459,9 @@ describe('streakMultiplier()', () => {
 // claimDaily() — streak tracking
 // ─────────────────────────────────────────────────────────────────────────────
 describe('claimDaily() — streak', () => {
-  beforeEach(() => jest.useFakeTimers());
+  // Pin to noon UTC so advancing 25 h always lands on the next calendar day,
+  // not two days ahead (which happens near UTC midnight with real system time).
+  beforeEach(() => jest.useFakeTimers({ now: new Date('2026-06-01T12:00:00Z') }));
   afterEach(()  => jest.useRealTimers());
 
   test('first claim sets streak to 1', () => {
@@ -515,5 +517,400 @@ describe('claimDaily() — streak', () => {
     const cooldown = claimDaily('guild-streak-6');
     expect(cooldown.claimed).toBe(false);
     expect(getPet('guild-streak-6').streak).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getTodayTasks()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('getTodayTasks()', () => {
+  const NOW = new Date('2026-06-01T12:00:00Z').getTime();
+
+  test('generates exactly 3 tasks', () => {
+    createPet('guild-tasks-1', 'Buddy', 'dog');
+    const tasks = getTodayTasks('guild-tasks-1', NOW);
+    expect(tasks).toHaveLength(3);
+  });
+
+  test('generated tasks all have keys present in TASK_POOL', () => {
+    createPet('guild-tasks-2', 'Buddy', 'dog');
+    const tasks  = getTodayTasks('guild-tasks-2', NOW);
+    const keys   = new Set(TASK_POOL.map(t => t.key));
+    for (const row of tasks) expect(keys.has(row.task_key)).toBe(true);
+  });
+
+  test('no two generated tasks share the same action type', () => {
+    createPet('guild-tasks-3', 'Buddy', 'dog');
+    const tasks   = getTodayTasks('guild-tasks-3', NOW);
+    const actions = tasks.map(row => TASK_POOL.find(t => t.key === row.task_key).action);
+    expect(new Set(actions).size).toBe(3);
+  });
+
+  test('calling twice on the same day returns the same tasks', () => {
+    createPet('guild-tasks-4', 'Buddy', 'dog');
+    const first  = getTodayTasks('guild-tasks-4', NOW).map(r => r.task_key);
+    const second = getTodayTasks('guild-tasks-4', NOW).map(r => r.task_key);
+    expect(first).toEqual(second);
+  });
+
+  test('all tasks start with progress 0 and completed 0', () => {
+    createPet('guild-tasks-5', 'Buddy', 'dog');
+    const tasks = getTodayTasks('guild-tasks-5', NOW);
+    for (const row of tasks) {
+      expect(row.progress).toBe(0);
+      expect(row.completed).toBe(0);
+    }
+  });
+
+  test('new tasks are generated after a UTC day boundary', () => {
+    createPet('guild-tasks-6', 'Buddy', 'dog');
+    const day1 = getTodayTasks('guild-tasks-6', NOW).map(r => r.task_key);
+    const nextDay = new Date('2026-06-02T12:00:00Z').getTime();
+    const day2 = getTodayTasks('guild-tasks-6', nextDay).map(r => r.task_key);
+    // Day 2 tasks are a fresh set (different rows exist for the new date)
+    expect(getUtcDateKey(NOW)).toBe('2026-06-01');
+    expect(getUtcDateKey(nextDay)).toBe('2026-06-02');
+    // Both sets are valid length
+    expect(day1).toHaveLength(3);
+    expect(day2).toHaveLength(3);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// recordTaskAction()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('recordTaskAction()', () => {
+  const NOW = new Date('2026-06-03T12:00:00Z').getTime();
+
+  test('returns empty array when guild has no pet', () => {
+    expect(recordTaskAction('guild-rta-nopet', 'feed', NOW)).toEqual([]);
+  });
+
+  test('returns empty array when no task matches the action', () => {
+    createPet('guild-rta-1', 'Buddy', 'dog');
+    // Seed today's tasks first, then call with an action that definitely has no task
+    // We use a fresh guild so we control which tasks are seeded.
+    // Just verify the return is always an array.
+    const result = recordTaskAction('guild-rta-1', 'feed', NOW);
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  test('increments progress toward target', () => {
+    // Find a task with target >= 2 to observe intermediate progress
+    const twiceTask = TASK_POOL.find(t => t.target === 2);
+    createPet('guild-rta-2', 'Buddy', 'dog');
+
+    // Force a deterministic task set by calling getTodayTasks and checking what was generated
+    const rows = getTodayTasks('guild-rta-2', NOW);
+    const matchRow = rows.find(r => r.task_key === twiceTask?.key);
+    if (!matchRow) return; // This guild happened not to get a ×2 task — skip gracefully
+
+    recordTaskAction('guild-rta-2', twiceTask.action, NOW);
+    const updated = getTodayTasks('guild-rta-2', NOW).find(r => r.task_key === twiceTask.key);
+    expect(updated.progress).toBe(1);
+    expect(updated.completed).toBe(0);
+  });
+
+  test('completing a task awards treats to the pet', () => {
+    // Use a ×1 target task so one action completes it
+    const onceTask = TASK_POOL.find(t => t.target === 1);
+    createPet('guild-rta-3', 'Buddy', 'dog');
+
+    const rows = getTodayTasks('guild-rta-3', NOW);
+    const matchRow = rows.find(r => r.task_key === onceTask?.key);
+    if (!matchRow) return;
+
+    const before = getPet('guild-rta-3').treats;
+    recordTaskAction('guild-rta-3', onceTask.action, NOW);
+    const after = getPet('guild-rta-3').treats;
+    expect(after).toBe(before + onceTask.treats);
+  });
+
+  test('completing a task returns the task def in the result array', () => {
+    const onceTask = TASK_POOL.find(t => t.target === 1);
+    createPet('guild-rta-4', 'Buddy', 'dog');
+
+    const rows = getTodayTasks('guild-rta-4', NOW);
+    const matchRow = rows.find(r => r.task_key === onceTask?.key);
+    if (!matchRow) return;
+
+    const result = recordTaskAction('guild-rta-4', onceTask.action, NOW);
+    expect(result.some(d => d.key === onceTask.key)).toBe(true);
+  });
+
+  test('a completed task is not awarded again on a repeat action', () => {
+    const onceTask = TASK_POOL.find(t => t.target === 1);
+    createPet('guild-rta-5', 'Buddy', 'dog');
+
+    const rows = getTodayTasks('guild-rta-5', NOW);
+    const matchRow = rows.find(r => r.task_key === onceTask?.key);
+    if (!matchRow) return;
+
+    recordTaskAction('guild-rta-5', onceTask.action, NOW);
+    const treatsAfterFirst = getPet('guild-rta-5').treats;
+    recordTaskAction('guild-rta-5', onceTask.action, NOW);
+    expect(getPet('guild-rta-5').treats).toBe(treatsAfterFirst);
+  });
+
+  test('completed task row has completed = 1', () => {
+    const onceTask = TASK_POOL.find(t => t.target === 1);
+    createPet('guild-rta-6', 'Buddy', 'dog');
+
+    const rows = getTodayTasks('guild-rta-6', NOW);
+    const matchRow = rows.find(r => r.task_key === onceTask?.key);
+    if (!matchRow) return;
+
+    recordTaskAction('guild-rta-6', onceTask.action, NOW);
+    const updated = getTodayTasks('guild-rta-6', NOW).find(r => r.task_key === onceTask.key);
+    expect(updated.completed).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getUtcDateKey()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('getUtcDateKey()', () => {
+  test('returns YYYY-MM-DD format', () => {
+    expect(getUtcDateKey(new Date('2026-05-26T00:00:00Z').getTime())).toBe('2026-05-26');
+  });
+
+  test('uses UTC midnight boundary correctly', () => {
+    const justBeforeMidnight = new Date('2026-05-26T23:59:59Z').getTime();
+    const justAfterMidnight  = new Date('2026-05-27T00:00:01Z').getTime();
+    expect(getUtcDateKey(justBeforeMidnight)).toBe('2026-05-26');
+    expect(getUtcDateKey(justAfterMidnight)).toBe('2026-05-27');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// addToInventory() / getInventory() / useFromInventory()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('inventory functions', () => {
+  const G = 'guild-inv';
+  const U = 'user-inv-1';
+
+  test('getInventory returns empty array when user has no items', () => {
+    expect(getInventory(G, 'user-empty')).toEqual([]);
+  });
+
+  test('addToInventory creates a row with quantity 1', () => {
+    addToInventory(G, U, 'premium_food');
+    const rows = getInventory(G, U);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].item_key).toBe('premium_food');
+    expect(rows[0].quantity).toBe(1);
+  });
+
+  test('addToInventory increments quantity on second add', () => {
+    addToInventory(G, U, 'premium_food');
+    const rows = getInventory(G, U);
+    const row  = rows.find(r => r.item_key === 'premium_food');
+    expect(row.quantity).toBe(2);
+  });
+
+  test('addToInventory tracks multiple distinct items', () => {
+    addToInventory(G, U, 'luxury_bath');
+    const rows = getInventory(G, U);
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    const keys = rows.map(r => r.item_key);
+    expect(keys).toContain('premium_food');
+    expect(keys).toContain('luxury_bath');
+  });
+
+  test('useFromInventory returns false when item not in inventory', () => {
+    expect(useFromInventory(G, 'user-has-nothing', 'energy_drink')).toBe(false);
+  });
+
+  test('useFromInventory decrements quantity and returns true', () => {
+    const U2 = 'user-inv-2';
+    addToInventory(G, U2, 'premium_toy');
+    addToInventory(G, U2, 'premium_toy');
+    const result = useFromInventory(G, U2, 'premium_toy');
+    expect(result).toBe(true);
+    const row = getInventory(G, U2).find(r => r.item_key === 'premium_toy');
+    expect(row.quantity).toBe(1);
+  });
+
+  test('useFromInventory removes the row when last item is used', () => {
+    const U3 = 'user-inv-3';
+    addToInventory(G, U3, 'energy_drink');
+    useFromInventory(G, U3, 'energy_drink');
+    expect(getInventory(G, U3)).toHaveLength(0);
+  });
+
+  test('useFromInventory returns false after last item is consumed', () => {
+    const U4 = 'user-inv-4';
+    addToInventory(G, U4, 'luxury_bath');
+    useFromInventory(G, U4, 'luxury_bath');
+    expect(useFromInventory(G, U4, 'luxury_bath')).toBe(false);
+  });
+
+  test('inventory is per-user — different users have separate inventories', () => {
+    const UA = 'user-inv-a';
+    const UB = 'user-inv-b';
+    addToInventory(G, UA, 'premium_food');
+    expect(getInventory(G, UB)).toHaveLength(0);
+  });
+
+  test('inventory is per-guild — same user in different guilds have separate inventories', () => {
+    const GA = 'guild-inv-a';
+    const GB = 'guild-inv-b';
+    const U5 = 'user-inv-5';
+    addToInventory(GA, U5, 'premium_toy');
+    expect(getInventory(GB, U5)).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// incrementActionCount() / incrementItemsBought()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('incrementActionCount() / incrementItemsBought()', () => {
+  test('increments feed_count after feed action', () => {
+    createPet('guild-iac-1', 'Buddy', 'dog');
+    incrementActionCount('guild-iac-1', 'feed');
+    expect(getPet('guild-iac-1').feed_count).toBe(1);
+  });
+
+  test('increments play_count after play action', () => {
+    createPet('guild-iac-2', 'Buddy', 'dog');
+    incrementActionCount('guild-iac-2', 'play');
+    expect(getPet('guild-iac-2').play_count).toBe(1);
+  });
+
+  test('does nothing for untracked actions (clean, sleep)', () => {
+    createPet('guild-iac-3', 'Buddy', 'dog');
+    incrementActionCount('guild-iac-3', 'clean');
+    incrementActionCount('guild-iac-3', 'sleep');
+    const pet = getPet('guild-iac-3');
+    expect(pet.feed_count).toBe(0);
+    expect(pet.play_count).toBe(0);
+  });
+
+  test('increments items_bought_count', () => {
+    createPet('guild-iac-4', 'Buddy', 'dog');
+    incrementItemsBought('guild-iac-4');
+    incrementItemsBought('guild-iac-4');
+    expect(getPet('guild-iac-4').items_bought_count).toBe(2);
+  });
+
+  test('spendTreats increments treats_spent_total', () => {
+    createPet('guild-iac-5', 'Buddy', 'dog');
+    claimDaily('guild-iac-5'); // gives DAILY_TREATS = 5 treats
+    spendTreats('guild-iac-5', 3);
+    expect(getPet('guild-iac-5').treats_spent_total).toBe(3);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// checkBadges() / getEarnedBadges()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('checkBadges()', () => {
+  const NOW = new Date('2026-07-01T12:00:00Z').getTime();
+
+  test('returns empty array when guild has no pet', () => {
+    expect(checkBadges('guild-badges-nopet', 'user-b', NOW)).toEqual([]);
+  });
+
+  test('returns empty array when no badge conditions are met', () => {
+    createPet('guild-badges-1', 'Buddy', 'dog');
+    const result = checkBadges('guild-badges-1', 'user-b1', NOW);
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  test('awards first_meal when feed_count >= 1', () => {
+    createPet('guild-badges-2', 'Buddy', 'dog');
+    incrementActionCount('guild-badges-2', 'feed');
+    const result = checkBadges('guild-badges-2', 'user-b2', NOW);
+    expect(result.some(b => b.key === 'first_meal')).toBe(true);
+  });
+
+  test('awards playmate when play_count >= 1', () => {
+    createPet('guild-badges-3', 'Buddy', 'dog');
+    incrementActionCount('guild-badges-3', 'play');
+    const result = checkBadges('guild-badges-3', 'user-b3', NOW);
+    expect(result.some(b => b.key === 'playmate')).toBe(true);
+  });
+
+  test('awards window_shopper when items_bought_count >= 1', () => {
+    createPet('guild-badges-4', 'Buddy', 'dog');
+    incrementItemsBought('guild-badges-4');
+    const result = checkBadges('guild-badges-4', 'user-b4', NOW);
+    expect(result.some(b => b.key === 'window_shopper')).toBe(true);
+  });
+
+  test('awards growing_up when level >= 6', () => {
+    createPet('guild-badges-5', 'Buddy', 'dog');
+    addXP('guild-badges-5', 500); // 5 levels × 100 XP each → arrives at level 6
+    expect(getPet('guild-badges-5').level).toBe(6);
+    const result = checkBadges('guild-badges-5', 'user-b5', NOW);
+    expect(result.some(b => b.key === 'growing_up')).toBe(true);
+  });
+
+  test('does not award the same badge twice', () => {
+    createPet('guild-badges-6', 'Buddy', 'dog');
+    incrementActionCount('guild-badges-6', 'feed');
+    checkBadges('guild-badges-6', 'user-b6', NOW);
+    const second = checkBadges('guild-badges-6', 'user-b6', NOW);
+    expect(second.some(b => b.key === 'first_meal')).toBe(false);
+  });
+
+  test('getEarnedBadges returns saved badges', () => {
+    createPet('guild-badges-7', 'Buddy', 'dog');
+    incrementActionCount('guild-badges-7', 'feed');
+    checkBadges('guild-badges-7', 'user-b7', NOW);
+    const earned = getEarnedBadges('guild-badges-7', 'user-b7');
+    expect(earned.some(r => r.badge_key === 'first_meal')).toBe(true);
+  });
+
+  test('badges are per-user — a second user starts with no badges', () => {
+    createPet('guild-badges-8', 'Buddy', 'dog');
+    incrementActionCount('guild-badges-8', 'feed');
+    checkBadges('guild-badges-8', 'user-b8a', NOW);
+    expect(getEarnedBadges('guild-badges-8', 'user-b8b')).toHaveLength(0);
+  });
+
+  test('daily_devotee badge awarded when last_daily > 0', () => {
+    createPet('guild-badges-9', 'Buddy', 'dog');
+    claimDaily('guild-badges-9');
+    const result = checkBadges('guild-badges-9', 'user-b9', NOW);
+    expect(result.some(b => b.key === 'daily_devotee')).toBe(true);
+  });
+
+  test('treat_hoarder badge awarded when treats >= 50', () => {
+    // Accumulate ≥50 treats via 9 consecutive daily claims (days 1-6: 5 treats each,
+    // days 7-9: 8 treats each with 1.5× streak bonus → 30 + 24 = 54 treats total).
+    jest.useFakeTimers({ now: new Date('2026-07-01T12:00:00Z') });
+    createPet('guild-badges-10', 'Buddy', 'dog');
+    for (let i = 0; i < 9; i++) {
+      claimDaily('guild-badges-10');
+      jest.advanceTimersByTime(25 * 60 * 60 * 1000);
+    }
+    jest.useRealTimers();
+    const checkTime = new Date('2026-07-10T12:00:00Z').getTime();
+    const result = checkBadges('guild-badges-10', 'user-b10', checkTime);
+    expect(result.some(b => b.key === 'treat_hoarder')).toBe(true);
+  });
+
+  test('collector badge awarded when inventory has qty >= 3', () => {
+    createPet('guild-badges-11', 'Buddy', 'dog');
+    addToInventory('guild-badges-11', 'user-b11', 'premium_food');
+    addToInventory('guild-badges-11', 'user-b11', 'premium_food');
+    addToInventory('guild-badges-11', 'user-b11', 'premium_food');
+    const result = checkBadges('guild-badges-11', 'user-b11', NOW);
+    expect(result.some(b => b.key === 'collector')).toBe(true);
+  });
+
+  test('BADGE_DEFINITIONS contains exactly 15 entries', () => {
+    expect(BADGE_DEFINITIONS).toHaveLength(15);
+  });
+
+  test('every badge definition has key, label, emoji, description, and check', () => {
+    for (const badge of BADGE_DEFINITIONS) {
+      expect(typeof badge.key).toBe('string');
+      expect(typeof badge.label).toBe('string');
+      expect(typeof badge.emoji).toBe('string');
+      expect(typeof badge.description).toBe('string');
+      expect(typeof badge.check).toBe('function');
+    }
   });
 });

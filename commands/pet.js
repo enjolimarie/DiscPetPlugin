@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, claimDaily, spendTreats, streakMultiplier } = require('../database/db');
+const { getPet, createPet, deletePet, renamePet, updateStat, addXP, xpToNextLevel, applyDecay, claimDaily, spendTreats, streakMultiplier, getTodayTasks, recordTaskAction, TASK_POOL, addToInventory, getInventory, useFromInventory, incrementActionCount, incrementItemsBought, BADGE_DEFINITIONS, getEarnedBadges, checkBadges } = require('../database/db');
 
 const SPECIES_EMOJI = {
   cat:          '🐱',
@@ -74,6 +74,12 @@ function buildStatusEmbed(pet) {
       { name: '🔥 Streak',       value: `${pet.streak ?? 1} day${(pet.streak ?? 1) !== 1 ? 's' : ''}`, inline: true },
     )
     .setFooter({ text: `Last updated • ${new Date(pet.last_updated).toLocaleString()}` });
+}
+
+function badgeNote(newBadges) {
+  if (!newBadges.length) return '';
+  const list = newBadges.map(b => `${b.emoji} **${b.label}**`).join(', ');
+  return `🏅 Badge${newBadges.length > 1 ? 's' : ''} unlocked: ${list}!`;
 }
 
 const SHOP_ITEMS = {
@@ -197,12 +203,18 @@ module.exports = {
       sub.setName('daily').setDescription('Claim your daily XP and treat reward'),
     )
     .addSubcommand(sub =>
+      sub.setName('tasks').setDescription("View today's daily tasks and your progress"),
+    )
+    .addSubcommand(sub =>
+      sub.setName('badges').setDescription('View your earned badges and locked milestones'),
+    )
+    .addSubcommand(sub =>
       sub.setName('shop').setDescription('Browse the treat shop'),
     )
     .addSubcommand(sub =>
       sub
         .setName('buy')
-        .setDescription('Buy an item from the shop using treats')
+        .setDescription('Buy an item from the shop — stores it in your inventory')
         .addStringOption(opt =>
           opt
             .setName('item')
@@ -213,6 +225,26 @@ module.exports = {
               { name: 'Premium Toy (10 treats)',   value: 'premium_toy'   },
               { name: 'Luxury Bath (8 treats)',    value: 'luxury_bath'   },
               { name: 'Energy Drink (8 treats)',   value: 'energy_drink'  },
+            ),
+        ),
+    )
+    .addSubcommand(sub =>
+      sub.setName('inventory').setDescription('View your stored items'),
+    )
+    .addSubcommand(sub =>
+      sub
+        .setName('use')
+        .setDescription('Use an item from your inventory on the server pet')
+        .addStringOption(opt =>
+          opt
+            .setName('item')
+            .setDescription('The item to use')
+            .setRequired(true)
+            .addChoices(
+              { name: 'Premium Food',  value: 'premium_food'  },
+              { name: 'Premium Toy',   value: 'premium_toy'   },
+              { name: 'Luxury Bath',   value: 'luxury_bath'   },
+              { name: 'Energy Drink',  value: 'energy_drink'  },
             ),
         ),
     )
@@ -255,9 +287,13 @@ module.exports = {
         updateStat(guildId, stat, delta);
       }
       addXP(guildId, action.xp);
-      const updated = getPet(guildId);
+      incrementActionCount(guildId, sub);
+      const done       = recordTaskAction(guildId, sub);
+      const newBadges  = checkBadges(guildId, interaction.user.id);
+      const updated    = getPet(guildId);
+      const taskNote   = done.map(t => `✅ Task complete: **${t.label}**! +${t.treats} 🍬 +${t.xp} XP`).join('\n');
       return interaction.reply({
-        content: `You ${action.verb} **${pet.pet_name}**! ${action.emoji}`,
+        content: [`You ${action.verb} **${pet.pet_name}**! ${action.emoji}`, taskNote, badgeNote(newBadges)].filter(Boolean).join('\n'),
         embeds: [buildStatusEmbed(updated)],
       });
     }
@@ -284,8 +320,11 @@ module.exports = {
       const streakLine = result.streak > 1
         ? ` 🔥 **${result.streak}-day streak!**${result.multiplier > 1 ? ` (${result.multiplier}× bonus)` : ''}`
         : '';
+      const dailyDone  = recordTaskAction(guildId, 'daily');
+      const newBadges  = checkBadges(guildId, interaction.user.id);
+      const taskNote   = dailyDone.map(t => `✅ Task complete: **${t.label}**! +${t.treats} 🍬 +${t.xp} XP`).join('\n');
       return interaction.reply({
-        content: `🎁 Daily reward claimed! **${result.pet.pet_name}** received **+${result.xp} XP** and **+${result.treats} treats**!${streakLine}`,
+        content: [`🎁 Daily reward claimed! **${result.pet.pet_name}** received **+${result.xp} XP** and **+${result.treats} treats**!${streakLine}`, taskNote, badgeNote(newBadges)].filter(Boolean).join('\n'),
         embeds: [buildStatusEmbed(result.pet)],
       });
     }
@@ -313,7 +352,7 @@ module.exports = {
 
     // ── /pet buy ──────────────────────────────────────────────────────────────
     if (sub === 'buy') {
-      const pet = applyDecay(guildId);
+      const pet = getPet(guildId);
       if (!pet) {
         return interaction.reply({
           content: "This server doesn't have a pet yet! Use `/pet adopt` to get one.",
@@ -332,16 +371,132 @@ module.exports = {
         });
       }
 
+      addToInventory(guildId, interaction.user.id, itemKey);
+      incrementItemsBought(guildId);
+      const buyDone  = recordTaskAction(guildId, 'buy');
+      const newBadges = checkBadges(guildId, interaction.user.id);
+      const taskNote = buyDone.map(t => `✅ Task complete: **${t.label}**! +${t.treats} 🍬 +${t.xp} XP`).join('\n');
+      return interaction.reply({
+        content: [`${item.emoji} **${item.name}** added to your inventory! (-${item.cost} 🍬)\nUse \`/pet use\` when you're ready to apply it.`, taskNote, badgeNote(newBadges)].filter(Boolean).join('\n'),
+      });
+    }
+
+    // ── /pet inventory ────────────────────────────────────────────────────────
+    if (sub === 'inventory') {
+      const rows = getInventory(guildId, interaction.user.id);
+
+      if (rows.length === 0) {
+        return interaction.reply({
+          content: "Your inventory is empty! Buy items from the shop with `/pet buy`.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      const fields = rows.map(row => {
+        const item = SHOP_ITEMS[row.item_key];
+        return {
+          name:   `${item.emoji} ${item.name} ×${row.quantity}`,
+          value:  item.description,
+          inline: false,
+        };
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`🎒 ${interaction.user.displayName}'s Inventory`)
+        .addFields(fields)
+        .setFooter({ text: 'Use /pet use to apply an item to your pet.' });
+
+      return interaction.reply({ embeds: [embed] });
+    }
+
+    // ── /pet use ──────────────────────────────────────────────────────────────
+    if (sub === 'use') {
+      const pet = applyDecay(guildId);
+      if (!pet) {
+        return interaction.reply({
+          content: "This server doesn't have a pet yet! Use `/pet adopt` to get one.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      const itemKey = interaction.options.getString('item');
+      const item    = SHOP_ITEMS[itemKey];
+
+      const consumed = useFromInventory(guildId, interaction.user.id, itemKey);
+      if (!consumed) {
+        return interaction.reply({
+          content: `You don't have **${item.name}** in your inventory. Buy one with \`/pet buy\`.`,
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
       for (const [stat, delta] of item.changes) {
         updateStat(guildId, stat, delta);
       }
       addXP(guildId, item.xp);
-
-      const updated = getPet(guildId);
+      const newBadges = checkBadges(guildId, interaction.user.id);
+      const updated   = getPet(guildId);
       return interaction.reply({
-        content: `${item.emoji} You used **${item.name}** on **${pet.pet_name}**! (-${item.cost} 🍬, +${item.xp} XP)`,
+        content: [`${item.emoji} You used **${item.name}** on **${pet.pet_name}**! (+${item.xp} XP)`, badgeNote(newBadges)].filter(Boolean).join('\n'),
         embeds: [buildStatusEmbed(updated)],
       });
+    }
+
+    // ── /pet tasks ────────────────────────────────────────────────────────────
+    if (sub === 'tasks') {
+      const pet = getPet(guildId);
+      if (!pet) {
+        return interaction.reply({
+          content: "This server doesn't have a pet yet! Use `/pet adopt` to get one.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+
+      const rows  = getTodayTasks(guildId);
+      const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
+
+      const lines = rows.map(row => {
+        const def      = TASK_POOL.find(t => t.key === row.task_key);
+        const check    = row.completed ? '✅' : '🔲';
+        const progress = row.completed ? `~~${def.target}/${def.target}~~` : `${row.progress}/${def.target}`;
+        return `${check} ${def.emoji} **${def.label}** — ${def.description} (${progress}) · +${def.treats} 🍬 +${def.xp} XP`;
+      });
+
+      const allDone = rows.every(r => r.completed);
+      const footer  = allDone ? 'All tasks complete for today! Come back tomorrow for new tasks.' : 'Rewards are granted automatically when each task is completed.';
+
+      const embed = new EmbedBuilder()
+        .setColor(allDone ? 0x57f287 : 0x5865f2)
+        .setTitle(`📋 Daily Tasks — ${today}`)
+        .setDescription(lines.join('\n\n'))
+        .setFooter({ text: footer });
+
+      return interaction.reply({ embeds: [embed] });
+    }
+
+    // ── /pet badges ───────────────────────────────────────────────────────────
+    if (sub === 'badges') {
+      const earned    = getEarnedBadges(guildId, interaction.user.id);
+      const earnedMap = new Map(earned.map(r => [r.badge_key, r.earned_at]));
+      const total     = BADGE_DEFINITIONS.length;
+      const count     = earnedMap.size;
+
+      const lines = BADGE_DEFINITIONS.map(badge => {
+        if (earnedMap.has(badge.key)) {
+          const date = new Date(earnedMap.get(badge.key)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+          return `✅ ${badge.emoji} **${badge.label}** — earned ${date}`;
+        }
+        return `🔒 ${badge.emoji} **${badge.label}** — ${badge.description}`;
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(count === total ? 0xffd700 : count > 0 ? 0x5865f2 : 0x747f8d)
+        .setTitle(`🏆 ${interaction.user.displayName}'s Badges — ${count} / ${total}`)
+        .setDescription(lines.join('\n'))
+        .setFooter({ text: count === total ? '🎉 All badges unlocked!' : 'Keep playing to unlock more badges.' });
+
+      return interaction.reply({ embeds: [embed] });
     }
 
     // ── /pet rename ───────────────────────────────────────────────────────────

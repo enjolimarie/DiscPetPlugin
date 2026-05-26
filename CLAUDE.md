@@ -40,12 +40,22 @@ npm start        # start the bot
 | `/pet rename` | Give the server pet a new name. |
 | `/pet daily` | Claim daily reward: base +50 XP and +5 treats (scaled by streak multiplier). Once per UTC day. Shows cooldown if already claimed. |
 | `/pet shop` | Browse the treat shop — shows all items, costs, and effects. |
-| `/pet buy` | Purchase and immediately use a shop item using treats. |
+| `/pet buy` | Purchase a shop item using treats — stores it in your personal inventory. |
+| `/pet inventory` | View your stored items (per user, per guild) with quantities. |
+| `/pet use` | Apply a stored item from your inventory to the server pet. |
+| `/pet tasks` | View today's 3 daily tasks with checkmark progress. Completing tasks awards 5–10 treats + XP automatically. |
+| `/pet badges` | View your personal badge collection — ✅ earned (with date) and 🔒 locked (with hint). |
 
 ## Database Layer (`database/db.js`)
 
 | Function | Description |
 |---|---|
+| `addToInventory(guildId, userId, itemKey)` | Adds one item to the user's inventory; increments quantity if already present. |
+| `getInventory(guildId, userId)` | Returns all inventory rows for the user in the guild. |
+| `useFromInventory(guildId, userId, itemKey)` | Decrements item quantity (removes row at 0). Returns `true` on success, `false` if not held. |
+| `getTodayTasks(guildId)` | Returns today's 3 task rows, generating them lazily if first call of the day. |
+| `recordTaskAction(guildId, actionType)` | Increments progress on matching tasks; completes and awards treats+XP on target reached. Returns array of newly-completed task defs. |
+| `getUtcDateKey(now?)` | Returns the UTC date as `YYYY-MM-DD`. |
 | `getPet(guildId)` | Returns the pet row or undefined. |
 | `createPet(guildId, name, species)` | Inserts a new pet with all stats at 80. |
 | `deletePet(guildId)` | Removes the pet row. |
@@ -120,7 +130,7 @@ New columns are added via `ALTER TABLE … ADD COLUMN` with a try/catch so exist
 npm test
 ```
 
-223 tests across 7 suites (all passing). Tests use an in-memory SQLite database via `TEST_DB_PATH=:memory:` so they never touch `pets.db` on disk. Time-based tests (decay, streak) use Jest fake timers.
+266 tests across 7 suites (all passing). Note: `mockInteraction.js` includes a default `user: { id: 'user-123', displayName: 'TestUser' }` field. Tests use an in-memory SQLite database via `TEST_DB_PATH=:memory:` so they never touch `pets.db` on disk. Time-based tests (decay, streak) use Jest fake timers.
 
 ## Resolved Issues
 
@@ -135,11 +145,11 @@ npm test
 - **Issue 009** — Shop system: `SHOP_ITEMS` defined in `pet.js`; `spendTreats()` in `db.js`. `/pet shop` shows browse embed with balance. `/pet buy` spends treats and applies premium effects immediately.
 - **Issue 010** — Life stages: `xpToNextLevel()` uses tiered thresholds (Baby 100, Child 250, Teen 500, Adult 1000). `getLifeStage(level)` maps level to a label and emoji shown in the status embed description.
 - **Issue 011** — Streak system: consecutive UTC-day `/daily` claims increment a streak counter; missing a day resets it to 1. Rewards scale with `streakMultiplier()` (×1.5 at 7 days, ×2 at 30 days). Streak visible in daily reply and status embed.
+- **Issue 012** — Daily tasks: 3 random tasks generated per guild per UTC day from a 10-task pool (feed/play/clean/sleep/daily/buy variants). `/pet tasks` shows ✅/🔲 progress embed. Completing a task auto-awards 5–10 treats + XP inline with the action reply. Tasks stored in `daily_tasks` table; rolled over at UTC midnight.
+- **Issue 014** — Badge system: 15 permanent per-user badges tracked in `achievements` table. Badges are checked automatically after every action and awarded inline. `/pet badges` shows ✅ earned (with date) and 🔒 locked (with hint). Pets table gains `feed_count`, `play_count`, `items_bought_count`, `treats_spent_total` counter columns to support badge conditions.
+- **Issue 013** — Inventory system: `/pet buy` now stores items in a per-user per-guild `inventory` table instead of applying them instantly. `/pet inventory` shows your stored items with quantities. `/pet use` consumes one item and applies its effects to the server pet.
 
 ## Planned Features
-
-**Issue 012 — Daily Tasks**
-Each UTC day a small set of tasks is generated for the server (e.g. "Play with your pet once", "Keep cleanliness above 80 for the day", "Feed your pet twice"). Completing tasks rewards treats or XP. Tasks reset at UTC midnight. Requires a `tasks` table tracking the active task list, completion state, and the date they were generated. A `/pet tasks` command shows current tasks and progress.
 
 **Issue 013 — Inventory System**
 Shop items can be stored rather than immediately used. Tracks items held per user via an `inventory` table keyed by `(guild_id, user_id)`. Commands:
