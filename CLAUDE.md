@@ -24,21 +24,21 @@ npm start        # start the bot
 - **`index.js`** — Creates the `Client`, auto-loads all files from `commands/` into a `Collection`, and dispatches `interactionCreate` events to the matching command's `execute()`. Includes a client-level error handler and a wrapped error reply to prevent crashes on expired interactions.
 - **`deploy-commands.js`** — One-shot script that POSTs slash command schemas to Discord's REST API. Set `GUILD_ID` for instant guild-scoped registration during development; omit for global.
 - **`commands/pet.js`** — Defines the `/pet` command tree. Subcommands branch inside a single `execute()` on `interaction.options.getSubcommand()`. Action subcommands (feed/play/clean/sleep) are driven by `ACTION_MAP`. Status embed is built by the shared `buildStatusEmbed()` helper so all commands display the same layout.
-- **`database/db.js`** — Opens `pets.db`, creates the `pets` table if needed, and exports synchronous helper functions. All stat values go through `clamp()`. XP leveling uses `xpToNextLevel(level) = level * 100`.
+- **`database/db.js`** — Opens `pets.db`, creates the `pets` table if needed, and exports synchronous helper functions. All stat values go through `clamp()`. XP leveling uses tiered thresholds via `xpToNextLevel(level)`.
 
 ## Implemented Commands
 
 | Command | Description |
 |---|---|
 | `/pet adopt` | Adopt a new pet (name + species). One per server. Supports custom species. |
-| `/pet status` | Display current stats, level, and XP progress bar. Color-coded by average health. |
+| `/pet status` | Display current stats, level, XP progress bar, life stage, mood state, and streak. Color-coded by average health. |
 | `/pet remove` | Permanently remove the server's pet. Requires typing the pet's name to confirm. |
 | `/pet feed` | Hunger +20, XP +10. Shows updated status embed. |
 | `/pet play` | Mood +15, Energy -10, XP +10. Shows updated status embed. |
 | `/pet clean` | Cleanliness +20, Mood -5, XP +10. Shows updated status embed. |
 | `/pet sleep` | Energy +30, Mood -5, XP +5. Shows updated status embed. |
 | `/pet rename` | Give the server pet a new name. |
-| `/pet daily` | Claim daily reward: +50 XP and +5 treats. Once per UTC day. Shows cooldown if already claimed. |
+| `/pet daily` | Claim daily reward: base +50 XP and +5 treats (scaled by streak multiplier). Once per UTC day. Shows cooldown if already claimed. |
 | `/pet shop` | Browse the treat shop — shows all items, costs, and effects. |
 | `/pet buy` | Purchase and immediately use a shop item using treats. |
 
@@ -50,12 +50,25 @@ npm start        # start the bot
 | `createPet(guildId, name, species)` | Inserts a new pet with all stats at 80. |
 | `deletePet(guildId)` | Removes the pet row. |
 | `renamePet(guildId, newName)` | Updates the pet's name and returns the updated row. |
-| `claimDaily(guildId)` | Awards daily XP and treats if not yet claimed today (UTC). Returns `{ claimed, xp, treats, pet }` or `{ claimed: false, msUntilReset }`. |
-| `spendTreats(guildId, amount)` | Deducts treats if balance is sufficient. Returns `true` on success, `false` if insufficient or no pet. |
+| `applyDecay(guildId)` | Computes time-based stat decay since `last_updated`, persists results, returns updated pet or null. |
 | `updateStat(guildId, stat, delta)` | Applies a delta to one stat column, clamped to [0, 100]. |
-| `addXP(guildId, amount)` | Adds XP and triggers level-ups. Excess XP carries over. |
-| `xpToNextLevel(level)` | Returns `level * 100` — XP needed to advance from `level` to `level + 1`. |
+| `addXP(guildId, amount)` | Adds XP and triggers level-ups with carry-over. |
+| `xpToNextLevel(level)` | Stage-based XP threshold: Baby 100, Child 250, Teen 500, Adult 1000. |
+| `claimDaily(guildId)` | Awards daily XP and treats (scaled by streak) if not yet claimed today (UTC). Returns `{ claimed, xp, treats, streak, multiplier, pet }` or `{ claimed: false, msUntilReset }`. |
+| `streakMultiplier(streak)` | Returns reward multiplier: 1 (default), 1.5 (7+ days), 2 (30+ days). |
+| `spendTreats(guildId, amount)` | Deducts treats if balance is sufficient. Returns `true` on success, `false` if insufficient or no pet. |
 | `clamp(val)` | Clamps and rounds a value to [0, 100]. |
+
+## Helper Functions (`commands/pet.js`)
+
+| Function | Description |
+|---|---|
+| `getLifeStage(level)` | Returns `{ label, emoji }` for the pet's life stage (Baby/Child/Teen/Adult). |
+| `getMoodState(pet, now)` | Derives mood label+emoji (Sick/Grumpy/Sleepy/Sad/Lonely/Bored/Happy/Content) from stats and time since last interaction. |
+| `buildStatusEmbed(pet)` | Builds the full EmbedBuilder status card shown by status and action commands. |
+| `statBar(value)` | Renders a 10-block ASCII progress bar for a stat value. |
+| `xpBar(xp, level)` | Renders an XP progress bar toward the next level. |
+| `speciesEmoji(species)` | Returns the emoji for a given species string. |
 
 ## Pets Table Schema
 
@@ -73,8 +86,27 @@ npm start        # start the bot
 | `last_updated` | INTEGER | epoch ms |
 | `treats` | INTEGER | 0 |
 | `last_daily` | INTEGER | 0 (never claimed) |
+| `streak` | INTEGER | 1 |
 
 Stats are always clamped to `[0, 100]`. Use `clamp()` from `database/db.js` whenever writing a stat.
+New columns are added via `ALTER TABLE … ADD COLUMN` with a try/catch so existing databases migrate automatically.
+
+## Life Stages
+
+| Stage | Levels | XP per level | Emoji |
+|---|---|---|---|
+| Baby  | 1–5   | 100  | 🍼 |
+| Child | 6–15  | 250  | 🌱 |
+| Teen  | 16–30 | 500  | ⚡ |
+| Adult | 31+   | 1000 | 👑 |
+
+## Streak Multipliers
+
+| Streak | Multiplier | Daily XP | Daily Treats |
+|---|---|---|---|
+| 1–6 days   | ×1   | 50 | 5  |
+| 7–29 days  | ×1.5 | 75 | 8  |
+| 30+ days   | ×2   | 100 | 10 |
 
 ## Adding New Commands
 
@@ -88,7 +120,7 @@ Stats are always clamped to `[0, 100]`. Use `clamp()` from `database/db.js` when
 npm test
 ```
 
-135 tests across 6 suites (all passing). Tests use an in-memory SQLite database via `TEST_DB_PATH=:memory:` so they never touch `pets.db` on disk.
+223 tests across 7 suites (all passing). Tests use an in-memory SQLite database via `TEST_DB_PATH=:memory:` so they never touch `pets.db` on disk. Time-based tests (decay, streak) use Jest fake timers.
 
 ## Resolved Issues
 
@@ -96,19 +128,15 @@ npm test
 - **Issue 002** — Bot crash on expired interaction: error handler reply is now wrapped in a second try/catch so a failed followUp no longer throws an unhandled error that kills the process.
 - **Issue 003** — Deprecation warnings: replaced `ephemeral: true` with `MessageFlags.Ephemeral`, renamed `ready` event to `clientReady`, and added a `client.on('error')` handler.
 - **Issue 004** — `better-sqlite3` native binding failure on Node.js v26: upgraded from v9.6.0 to v12.x which supports Node 26.
-- **Issue 005** — Stats were permanently frozen at their initial values; stat decay now reduces hunger/mood/energy/cleanliness over time.
+- **Issue 005** — Stats were permanently frozen at their initial values; stat decay now reduces hunger/mood/energy/cleanliness over time via `applyDecay()`.
 - **Issue 006** — No way to rename a pet after adoption; `/pet rename` now allows the server to update the pet's name at any time.
-- **Issue 007** — Mood state system: `getMoodState(pet, now)` derives a visible mood label and emoji (Sick/Grumpy/Sleepy/Sad/Lonely/Bored/Happy/Content) from current stats and time since last interaction. Displayed in the `/pet status` embed description.
-- **Issue 008** — `/pet daily` command: once per UTC day per server, awards 50 XP and 5 treats. Cooldown reply shows hours/minutes until next reset. Treats balance shown in status embed.
-- **Issue 009** — Shop system: `SHOP_ITEMS` defined in `pet.js`; `spendTreats(guildId, amount)` in `db.js`. `/pet shop` shows browse embed with balance. `/pet buy item:<choice>` spends treats and applies premium effects immediately.
+- **Issue 007** — Mood state system: `getMoodState(pet, now)` derives a visible mood label and emoji (Sick/Grumpy/Sleepy/Sad/Lonely/Bored/Happy/Content) from current stats and time since last interaction. Displayed in the status embed description.
+- **Issue 008** — `/pet daily` command: once per UTC day per server, awards XP and treats (scaled by streak). Cooldown reply shows hours/minutes until next reset.
+- **Issue 009** — Shop system: `SHOP_ITEMS` defined in `pet.js`; `spendTreats()` in `db.js`. `/pet shop` shows browse embed with balance. `/pet buy` spends treats and applies premium effects immediately.
+- **Issue 010** — Life stages: `xpToNextLevel()` uses tiered thresholds (Baby 100, Child 250, Teen 500, Adult 1000). `getLifeStage(level)` maps level to a label and emoji shown in the status embed description.
+- **Issue 011** — Streak system: consecutive UTC-day `/daily` claims increment a streak counter; missing a day resets it to 1. Rewards scale with `streakMultiplier()` (×1.5 at 7 days, ×2 at 30 days). Streak visible in daily reply and status embed.
 
-## Planned Features (Issues 007–011)
-
-**Issue 007 — Mood State System** ✅ Resolved — See resolved issues.
-
-**Issue 008 — `/daily` Command** ✅ Resolved — See resolved issues.
-
-**Issue 009 — Shop System** ✅ Resolved — See resolved issues.
+## Planned Features
 
 **Issue 012 — Daily Tasks**
 Each UTC day a small set of tasks is generated for the server (e.g. "Play with your pet once", "Keep cleanliness above 80 for the day", "Feed your pet twice"). Completing tasks rewards treats or XP. Tasks reset at UTC midnight. Requires a `tasks` table tracking the active task list, completion state, and the date they were generated. A `/pet tasks` command shows current tasks and progress.
@@ -134,23 +162,3 @@ A `/pet profile` command (optionally `/pet profile user:@someone`) that displays
 
 **Issue 016 — Server vs Personal Pet Mode**
 Currently every server has one shared pet all members interact with together. This issue adds the option for each user to have their own personal pet. Would require a `mode` setting per guild (shared vs personal) and tracking pets by `(guild_id, user_id)` in personal mode. A server admin command would toggle the mode.
-
-**Issue 008 — `/daily` Command**
-Once per calendar day per server, any user can claim a reward: a fixed XP amount and a small number of treats (currency). Re-running before reset replies ephemerally with a cooldown timer. Requires a `last_daily` timestamp column in the pets table.
-
-**Issue 009 — Shop System (`/pet shop`)**
-A shop where treats (earned from `/daily`, actions, and streaks) can be spent on premium items:
-- Premium food: restores more hunger and awards more XP than `/pet feed`
-- Premium toys: boosts mood more and awards more XP than `/pet play`
-Requires adding a `treats` INTEGER column to the pets table and a shop inventory (defined in code, not DB). Commands: `/pet shop` (browse), `/pet shop buy item:<name>` (purchase and use immediately).
-
-**Issue 010 — Life Stages**
-Pets advance through four life stages as they level up, each with increasing XP requirements per level and a stage label shown in `/pet status`:
-- Baby (levels 1–5): 100 XP per level
-- Child (levels 6–15): 250 XP per level
-- Teen (levels 16–30): 500 XP per level
-- Adult (levels 31+): 1000 XP per level
-`xpToNextLevel()` will need to branch on the current level to return the correct threshold. The stage name and a stage emoji will be shown in the status embed description.
-
-**Issue 011 — Streak System**
-Track consecutive days a server has claimed `/daily`. Streaks multiply XP and treat rewards (e.g. ×1.5 at 7 days, ×2 at 30 days). Missing a day resets the streak to 1. Requires `streak` INTEGER and `last_daily` timestamp columns in the pets table (shared with Issue 008). Current streak is visible in the `/daily` response.
