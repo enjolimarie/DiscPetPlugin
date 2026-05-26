@@ -92,6 +92,33 @@ npm test
 - **Issue 005** — Stats were permanently frozen at their initial values; stat decay now reduces hunger/mood/energy/cleanliness over time.
 - **Issue 006** — No way to rename a pet after adoption; `/pet rename` now allows the server to update the pet's name at any time.
 
-## Planned Features (TODOs)
+## Planned Features (Issues 007–011)
 
-No outstanding TODOs at this time.
+**Issue 007 — Mood State System**
+Derive a visible mood label from the pet's current stat values and display it in `/pet status`. No new database column needed — the label is a pure display calculation. Example mapping:
+- Happy: mood ≥ 70 and hunger ≥ 50 and energy ≥ 50
+- Bored: hasn't been played with today (no play action since midnight)
+- Sleepy: energy < 20
+- Grumpy: hunger < 20
+- Sick: cleanliness < 20
+- Sad/Lonely: mood < 30 or no interaction in over 24 hours
+
+**Issue 008 — `/daily` Command**
+Once per calendar day per server, any user can claim a reward: a fixed XP amount and a small number of treats (currency). Re-running before reset replies ephemerally with a cooldown timer. Requires a `last_daily` timestamp column in the pets table.
+
+**Issue 009 — Shop System (`/pet shop`)**
+A shop where treats (earned from `/daily`, actions, and streaks) can be spent on premium items:
+- Premium food: restores more hunger and awards more XP than `/pet feed`
+- Premium toys: boosts mood more and awards more XP than `/pet play`
+Requires adding a `treats` INTEGER column to the pets table and a shop inventory (defined in code, not DB). Commands: `/pet shop` (browse), `/pet shop buy item:<name>` (purchase and use immediately).
+
+**Issue 010 — Life Stages**
+Pets advance through four life stages as they level up, each with increasing XP requirements per level and a stage label shown in `/pet status`:
+- Baby (levels 1–5): 100 XP per level
+- Child (levels 6–15): 250 XP per level
+- Teen (levels 16–30): 500 XP per level
+- Adult (levels 31+): 1000 XP per level
+`xpToNextLevel()` will need to branch on the current level to return the correct threshold. The stage name and a stage emoji will be shown in the status embed description.
+
+**Issue 011 — Streak System**
+Track consecutive days a server has claimed `/daily`. Streaks multiply XP and treat rewards (e.g. ×1.5 at 7 days, ×2 at 30 days). Missing a day resets the streak to 1. Requires `streak` INTEGER and `last_daily` timestamp columns in the pets table (shared with Issue 008). Current streak is visible in the `/daily` response.
