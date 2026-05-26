@@ -4,12 +4,13 @@ jest.mock('../../database/db', () => ({
   deletePet:      jest.fn(),
   updateStat:     jest.fn(),
   addXP:          jest.fn(),
+  applyDecay:     jest.fn(),
   xpToNextLevel:  jest.fn((level) => level * 100),
   clamp:          jest.fn((v) => Math.max(0, Math.min(100, Math.round(v)))),
 }));
 
 const { execute } = require('../../commands/pet');
-const { getPet, createPet, deletePet, updateStat, addXP } = require('../../database/db');
+const { getPet, createPet, deletePet, updateStat, addXP, applyDecay } = require('../../database/db');
 const { buildMockInteraction } = require('../helpers/mockInteraction');
 
 const HEALTHY_PET = {
@@ -171,7 +172,7 @@ describe.each([
   ['sleep', [['energy', 30], ['mood', -5]],        5],
 ])('/pet %s', (subcommand, expectedChanges, expectedXP) => {
   test('replies ephemerally when the server has no pet', async () => {
-    getPet.mockReturnValue(undefined);
+    applyDecay.mockReturnValue(null);
 
     const ix = buildMockInteraction({ subcommand });
     await execute(ix);
@@ -182,6 +183,7 @@ describe.each([
   });
 
   test('calls updateStat for each stat change', async () => {
+    applyDecay.mockReturnValue(HEALTHY_PET);
     getPet.mockReturnValue(HEALTHY_PET);
 
     const ix = buildMockInteraction({ subcommand });
@@ -193,6 +195,7 @@ describe.each([
   });
 
   test(`awards ${expectedXP} XP`, async () => {
+    applyDecay.mockReturnValue(HEALTHY_PET);
     getPet.mockReturnValue(HEALTHY_PET);
 
     const ix = buildMockInteraction({ subcommand });
@@ -202,6 +205,7 @@ describe.each([
   });
 
   test('replies with an embed showing the updated status', async () => {
+    applyDecay.mockReturnValue(HEALTHY_PET);
     getPet.mockReturnValue(HEALTHY_PET);
 
     const ix = buildMockInteraction({ subcommand });
@@ -218,7 +222,7 @@ describe.each([
 // ─────────────────────────────────────────────────────────────────────────────
 describe('/pet status', () => {
   test('replies ephemerally when the server has no pet', async () => {
-    getPet.mockReturnValue(undefined);
+    applyDecay.mockReturnValue(null);
 
     const ix = buildMockInteraction({ subcommand: 'status' });
     await execute(ix);
@@ -227,7 +231,7 @@ describe('/pet status', () => {
   });
 
   test('replies with an embed when a pet exists', async () => {
-    getPet.mockReturnValue(HEALTHY_PET);
+    applyDecay.mockReturnValue(HEALTHY_PET);
 
     const ix = buildMockInteraction({ subcommand: 'status' });
     await execute(ix);
@@ -236,7 +240,7 @@ describe('/pet status', () => {
   });
 
   test('embed title contains the pet name', async () => {
-    getPet.mockReturnValue(HEALTHY_PET);
+    applyDecay.mockReturnValue(HEALTHY_PET);
 
     const ix = buildMockInteraction({ subcommand: 'status' });
     await execute(ix);
@@ -245,7 +249,7 @@ describe('/pet status', () => {
   });
 
   test('embed uses green (0x57f287) when average stat >= 70', async () => {
-    getPet.mockReturnValue({ ...HEALTHY_PET, hunger: 80, mood: 80, energy: 80, cleanliness: 80 });
+    applyDecay.mockReturnValue({ ...HEALTHY_PET, hunger: 80, mood: 80, energy: 80, cleanliness: 80 });
 
     const ix = buildMockInteraction({ subcommand: 'status' });
     await execute(ix);
@@ -254,7 +258,7 @@ describe('/pet status', () => {
   });
 
   test('embed uses yellow (0xfee75c) when average stat is 40–69', async () => {
-    getPet.mockReturnValue({ ...HEALTHY_PET, hunger: 50, mood: 50, energy: 50, cleanliness: 50 });
+    applyDecay.mockReturnValue({ ...HEALTHY_PET, hunger: 50, mood: 50, energy: 50, cleanliness: 50 });
 
     const ix = buildMockInteraction({ subcommand: 'status' });
     await execute(ix);
@@ -263,7 +267,7 @@ describe('/pet status', () => {
   });
 
   test('embed uses red (0xed4245) when average stat < 40', async () => {
-    getPet.mockReturnValue({ ...HEALTHY_PET, hunger: 10, mood: 10, energy: 10, cleanliness: 10 });
+    applyDecay.mockReturnValue({ ...HEALTHY_PET, hunger: 10, mood: 10, energy: 10, cleanliness: 10 });
 
     const ix = buildMockInteraction({ subcommand: 'status' });
     await execute(ix);
@@ -272,7 +276,7 @@ describe('/pet status', () => {
   });
 
   test('colour boundary: exactly 70 average is green', async () => {
-    getPet.mockReturnValue({ ...HEALTHY_PET, hunger: 70, mood: 70, energy: 70, cleanliness: 70 });
+    applyDecay.mockReturnValue({ ...HEALTHY_PET, hunger: 70, mood: 70, energy: 70, cleanliness: 70 });
 
     const ix = buildMockInteraction({ subcommand: 'status' });
     await execute(ix);
@@ -281,7 +285,7 @@ describe('/pet status', () => {
   });
 
   test('colour boundary: exactly 40 average is yellow', async () => {
-    getPet.mockReturnValue({ ...HEALTHY_PET, hunger: 40, mood: 40, energy: 40, cleanliness: 40 });
+    applyDecay.mockReturnValue({ ...HEALTHY_PET, hunger: 40, mood: 40, energy: 40, cleanliness: 40 });
 
     const ix = buildMockInteraction({ subcommand: 'status' });
     await execute(ix);
@@ -290,7 +294,7 @@ describe('/pet status', () => {
   });
 
   test('embed includes fields for all four stats', async () => {
-    getPet.mockReturnValue(HEALTHY_PET);
+    applyDecay.mockReturnValue(HEALTHY_PET);
 
     const ix = buildMockInteraction({ subcommand: 'status' });
     await execute(ix);

@@ -2,7 +2,7 @@
 // Must be set before the module is first required.
 process.env.TEST_DB_PATH = ':memory:';
 
-const { getPet, createPet, deletePet, updateStat, addXP, xpToNextLevel, clamp } = require('../../database/db');
+const { getPet, createPet, deletePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, clamp } = require('../../database/db');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // deletePet()
@@ -246,5 +246,61 @@ describe('addXP()', () => {
 
   test('silently does nothing if the guild has no pet', () => {
     expect(() => addXP('guild-xp-none', 10)).not.toThrow();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// applyDecay()
+// ─────────────────────────────────────────────────────────────────────────────
+describe('applyDecay()', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  test('returns null when the guild has no pet', () => {
+    expect(applyDecay('guild-decay-none')).toBeNull();
+  });
+
+  test('returns the pet unchanged when no time has elapsed', () => {
+    createPet('guild-decay-1', 'Buddy', 'dog');
+    const pet = applyDecay('guild-decay-1');
+    expect(pet.hunger).toBe(80);
+    expect(pet.mood).toBe(80);
+    expect(pet.energy).toBe(80);
+    expect(pet.cleanliness).toBe(80);
+  });
+
+  test('reduces all four stats after 2 hours', () => {
+    createPet('guild-decay-2', 'Buddy', 'dog');
+    jest.advanceTimersByTime(2 * 60 * 60 * 1000);
+    const pet = applyDecay('guild-decay-2');
+    expect(pet.hunger).toBe(clamp(80 - DECAY_PER_HOUR.hunger * 2));
+    expect(pet.mood).toBe(clamp(80 - DECAY_PER_HOUR.mood * 2));
+    expect(pet.energy).toBe(clamp(80 - DECAY_PER_HOUR.energy * 2));
+    expect(pet.cleanliness).toBe(clamp(80 - DECAY_PER_HOUR.cleanliness * 2));
+  });
+
+  test('clamps all stats at 0 after extreme elapsed time', () => {
+    createPet('guild-decay-3', 'Buddy', 'dog');
+    jest.advanceTimersByTime(200 * 60 * 60 * 1000);
+    const pet = applyDecay('guild-decay-3');
+    expect(pet.hunger).toBe(0);
+    expect(pet.mood).toBe(0);
+    expect(pet.energy).toBe(0);
+    expect(pet.cleanliness).toBe(0);
+  });
+
+  test('hunger decays faster than cleanliness', () => {
+    createPet('guild-decay-4', 'Buddy', 'dog');
+    jest.advanceTimersByTime(10 * 60 * 60 * 1000);
+    const pet = applyDecay('guild-decay-4');
+    expect(pet.hunger).toBeLessThan(pet.cleanliness);
+  });
+
+  test('updates last_updated after applying decay', () => {
+    createPet('guild-decay-5', 'Buddy', 'dog');
+    const before = Date.now();
+    jest.advanceTimersByTime(60 * 60 * 1000);
+    const pet = applyDecay('guild-decay-5');
+    expect(pet.last_updated).toBeGreaterThan(before);
   });
 });

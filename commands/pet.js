@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const { getPet, createPet, deletePet, updateStat, addXP, xpToNextLevel } = require('../database/db');
+const { getPet, createPet, deletePet, updateStat, addXP, xpToNextLevel, applyDecay } = require('../database/db');
 
 const SPECIES_EMOJI = {
   cat:          '🐱',
@@ -147,7 +147,7 @@ module.exports = {
     // ── action commands (feed / play / clean / sleep) ─────────────────────────
     const action = ACTION_MAP[sub];
     if (action) {
-      const pet = getPet(guildId);
+      const pet = applyDecay(guildId);
       if (!pet) {
         return interaction.reply({
           content: "This server doesn't have a pet yet! Use `/pet adopt` to get one.",
@@ -230,7 +230,7 @@ module.exports = {
 
     // ── /pet status ───────────────────────────────────────────────────────────
     if (sub === 'status') {
-      const pet = getPet(guildId);
+      const pet = applyDecay(guildId);
       if (!pet) {
         return interaction.reply({
           content: "This server doesn't have a pet yet! Use `/pet adopt` to get one.",

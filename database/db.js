@@ -43,6 +43,34 @@ function xpToNextLevel(level) {
   return level * 100;
 }
 
+// Stat points lost per hour of inactivity
+const DECAY_PER_HOUR = {
+  hunger:      3,
+  mood:        2,
+  energy:      1.5,
+  cleanliness: 1,
+};
+
+function applyDecay(guildId) {
+  const pet = getPet(guildId);
+  if (!pet) return null;
+
+  const hoursElapsed = (Date.now() - pet.last_updated) / (1000 * 60 * 60);
+  if (hoursElapsed <= 0) return pet;
+
+  const hunger      = clamp(pet.hunger      - DECAY_PER_HOUR.hunger      * hoursElapsed);
+  const mood        = clamp(pet.mood        - DECAY_PER_HOUR.mood        * hoursElapsed);
+  const energy      = clamp(pet.energy      - DECAY_PER_HOUR.energy      * hoursElapsed);
+  const cleanliness = clamp(pet.cleanliness - DECAY_PER_HOUR.cleanliness * hoursElapsed);
+
+  db.prepare(`
+    UPDATE pets SET hunger = ?, mood = ?, energy = ?, cleanliness = ?, last_updated = ?
+    WHERE guild_id = ?
+  `).run(hunger, mood, energy, cleanliness, Date.now(), guildId);
+
+  return getPet(guildId);
+}
+
 const VALID_STATS = new Set(['hunger', 'mood', 'energy', 'cleanliness']);
 
 function updateStat(guildId, stat, delta) {
@@ -67,4 +95,4 @@ function addXP(guildId, amount) {
     .run(xp, level, Date.now(), guildId);
 }
 
-module.exports = { getPet, createPet, deletePet, updateStat, addXP, xpToNextLevel, clamp };
+module.exports = { getPet, createPet, deletePet, updateStat, addXP, xpToNextLevel, applyDecay, DECAY_PER_HOUR, clamp };
